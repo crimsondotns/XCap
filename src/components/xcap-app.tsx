@@ -3,6 +3,7 @@ import {
   Check,
   Download,
   Settings2,
+  Terminal,
   Volume2,
   VolumeX,
   X,
@@ -25,7 +26,7 @@ import {
 } from "@/lib/history";
 import { loadSettings, saveSettings } from "@/lib/settings";
 import type { ScanOk, ScanResult, Settings, Source } from "@/lib/types";
-import { DEFAULT_SETTINGS } from "@/lib/types";
+import { DEFAULT_CHART_HOST, DEFAULT_SETTINGS } from "@/lib/types";
 import { CHIME_NAMES, type ChimeName, playChime, primeChime } from "@/lib/chime";
 import { applyChartHit, cancelScan } from "@/lib/scan-impl";
 import { cn } from "@/lib/utils";
@@ -34,7 +35,11 @@ export function XCapApp() {
   const [source, setSource] = useState<Source>("cmc");
   const [query, setQuery] = useState("");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [panel, setPanel] = useState<"settings" | "install" | null>(null);
+  const [panel, setPanel] = useState<"settings" | "install" | "console" | null>(null);
+  // Chart bars requests the DexScreener frame saw, newest first.
+  const [netLog, setNetLog] = useState<LogEntry[]>([]);
+  // Bars URLs already logged, so a result updated by a chart hit adds nothing.
+  const loggedBars = useRef(new Set<string>());
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScanOk | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,9 +64,10 @@ export function XCapApp() {
         pool?: string;
         quote?: string;
         cs?: string;
+        url?: string;
       } | null;
       if (!data || data.source !== "xcap") return;
-      if (data.type !== "chart" && data.type !== "hello") return;
+      if (data.type !== "chart" && data.type !== "hello" && data.type !== "net") return;
       let host = "";
       try {
         host = new URL(ev.origin).hostname;
@@ -71,11 +77,93 @@ export function XCapApp() {
       if (host !== "dexscreener.com" && !host.endsWith(".dexscreener.com")) return;
       // Either message proves a content script is running in the frame.
       setExtensionVersion((prev) => data.version || prev || "unknown");
+      if (data.type === "net") {
+        const url = data.url;
+        if (!url) return;
+        console.log("[xcap] bars", url);
+        // The chart's own request is the only authority on where bars live:
+        // if DexScreener moves them again, the host follows on its own.
+        let barsHost = "";
+        try {
+          barsHost = new URL(url).host;
+        } catch {
+          /* not a URL; log it anyway */
+        }
+        if (barsHost) {
+          setSettings((prev) => {
+            if (prev.chartHost === barsHost) return prev;
+            const next = { ...prev, chartHost: barsHost };
+            saveSettings(next);
+            return next;
+          });
+        }
+        return;
+      }
       if (data.type !== "chart") return;
       setResult((prev) => (prev ? applyChartHit(prev, data) : prev));
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  // The page builds the bars URL from the scan itself, so the console works
+  // with no extension installed; the frame's own requests still add to it.
+  useEffect(() => {
+    if (!result || !result.ok) return;
+    const urls = result.rows.flatMap((row) =>
+      row.kind === "dex" && row.dexId && row.chain && row.poolAddress
+        ? [barsUrl(settings.chartHost, row.dexId, row.chain, row.poolAddress, row.quote)]
+        : [],
+    );
+    if (!urls.length) return;
+    for (const url of urls) {
+      if (loggedBars.current.has(url)) continue;
+      loggedBars.current.add(url);
+      console.log("[xcap] bars", url);
+    }
+  }, [result, settings.chartHost]);
+
+  // Everything the page logs, mirrored into the Console panel. Entries are
+  // queued and flushed a tick later: React logs from inside render, and a
+  // state update there would loop.
+  useEffect(() => {
+    const levels = ["log", "info", "warn", "error", "debug"] as const;
+    const originals = levels.map((level) => console[level]);
+    let queue: LogEntry[] = [];
+    let timer = 0;
+    function push(level: LogLevel, args: unknown[]) {
+      queue.push({ at: Date.now(), level, text: args.map(formatLogArg).join(" ") });
+      if (timer) return;
+      timer = window.setTimeout(() => {
+        const batch = queue.reverse();
+        queue = [];
+        timer = 0;
+        setNetLog((prev) => [...batch, ...prev].slice(0, 500));
+      }, 0);
+    }
+    levels.forEach((level, i) => {
+      console[level] = (...args: unknown[]) => {
+        originals[i].apply(console, args);
+        try {
+          push(level, args);
+        } catch {
+          /* never let the mirror break logging */
+        }
+      };
+    });
+    const onError = (ev: ErrorEvent) => push("error", [ev.error ?? ev.message]);
+    const onRejection = (ev: PromiseRejectionEvent) =>
+      push("error", ["Unhandled rejection:", ev.reason]);
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      levels.forEach((level, i) => {
+        console[level] = originals[i];
+      });
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+      window.clearTimeout(timer);
+    };
   }, []);
 
   function updateSettings(patch: Partial<Settings>) {
@@ -163,24 +251,6 @@ export function XCapApp() {
     }
   }
 
-  async function copyAndOpenSheet(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success("Copied — paste into the sheet");
-    } catch {
-      toast.error("Copy failed");
-    }
-    if (!settings.sheetUrl) {
-      toast.error("Set a Google Sheet URL in settings");
-      return;
-    }
-    if (settings.sheetSameTab) {
-      window.location.href = settings.sheetUrl;
-    } else {
-      window.open(settings.sheetUrl, "_blank", "noopener");
-    }
-  }
-
   // A scan with nothing to show yet keeps the idle screen: the dialog covers
   // it, and "Nothing found" would be wrong for a scan still running.
   const idle = (!hasScanned || scanning) && !result;
@@ -196,11 +266,11 @@ export function XCapApp() {
           <button
             type="button"
             title="Reload XCap"
-            className="-m-1 flex min-w-0 items-center gap-3 rounded-full p-1 transition-opacity duration-150 hover:opacity-80"
+            className="-m-1 flex min-w-0 items-center gap-3 rounded-full p-1 transition-opacity duration-150 hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             onClick={() => window.location.reload()}
           >
             <Mark size={32} />
-            <h1 className="truncate text-sm font-medium tracking-tight text-fg">XCap</h1>
+            <h1 className="truncate text-sm font-medium text-fg">XCap</h1>
           </button>
           <div className="ml-auto flex items-center gap-1">
             <Button
@@ -210,6 +280,14 @@ export function XCapApp() {
               onClick={() => setPanel(panel === "install" ? null : "install")}
             >
               <Download size={18} />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Console"
+              onClick={() => setPanel(panel === "console" ? null : "console")}
+            >
+              <Terminal size={18} />
             </Button>
             <Button
               size="icon"
@@ -228,6 +306,15 @@ export function XCapApp() {
           <SettingsPanel
             settings={settings}
             onChange={updateSettings}
+            onClose={() => setPanel(null)}
+          />
+        </Overlay>
+      ) : null}
+      {panel === "console" ? (
+        <Overlay onClose={() => setPanel(null)}>
+          <ConsolePanel
+            entries={netLog}
+            onClear={() => setNetLog([])}
             onClose={() => setPanel(null)}
           />
         </Overlay>
@@ -253,7 +340,6 @@ export function XCapApp() {
               setError(null);
               setHasScanned(false);
             }}
-            onOpenSheet={copyAndOpenSheet}
           />
         ) : error ? (
           <IdleFrame>
@@ -354,7 +440,7 @@ export function XCapApp() {
                 size="send"
                 disabled={!canScan}
                 aria-label="Scan"
-                className="mb-0.5"
+                className="mb-1"
               >
                 <ArrowUp size={18} />
               </Button>
@@ -380,7 +466,7 @@ function SourceTab({
       type="button"
       onClick={onClick}
       className={cn(
-        "h-10 rounded-full px-3 text-sm font-medium transition-colors duration-150",
+        "h-11 rounded-full px-3 text-sm font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         active ? "bg-fg text-bg" : "text-muted hover:bg-surface-2 hover:text-fg",
       )}
     >
@@ -410,7 +496,7 @@ function ChipLogo({ entry }: { entry: HistoryEntry }) {
 
   if (!src) {
     return (
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-2 text-[10px] font-medium text-muted">
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs font-medium text-muted">
         {(entry.label || "?").slice(0, 1)}
       </span>
     );
@@ -451,7 +537,7 @@ function History({
         <span className="text-xs text-faint">Recent</span>
         <button
           type="button"
-          className="ml-auto text-xs text-faint transition-colors duration-150 hover:text-fg"
+          className="ml-auto rounded-full text-xs text-faint transition-colors duration-150 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           onClick={onClear}
         >
           Clear
@@ -461,12 +547,18 @@ function History({
         {entries.map((e) => (
           <span
             key={e.query}
-            className="group relative flex h-9 items-center gap-1.5 rounded-full bg-surface pl-1.5 pr-3 shadow-ring transition-colors duration-150 hover:bg-surface-2"
+            className="group relative flex h-9 items-center gap-2 rounded-full bg-surface pl-2 pr-3 shadow-ring transition-colors duration-150 hover:bg-surface-2"
           >
             <button
               type="button"
               title={e.query}
-              className="flex min-w-0 items-center gap-1.5 text-left"
+              // The chip is 36px tall; the pseudo-element reaches 4px past it on
+              // both sides so the hit area is 44px without growing the chip.
+              className={cn(
+                "flex min-w-0 items-center gap-2 rounded-full text-left",
+                "after:absolute after:inset-x-0 after:-inset-y-1 after:content-['']",
+                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              )}
               onClick={() => onPick(e)}
             >
               <ChipLogo entry={e} />
@@ -483,7 +575,8 @@ function History({
               className={cn(
                 "absolute right-1 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center",
                 "rounded-full bg-surface-2 text-faint shadow-ring transition-opacity duration-150",
-                "hover:text-fg sm:opacity-0 sm:group-hover:opacity-100",
+                "z-10 hover:text-fg sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100",
+                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
               )}
               onClick={() => onForget(e)}
             >
@@ -555,7 +648,7 @@ function ScanningDialog({
         </div>
         <button
           type="button"
-          className="text-xs text-faint transition-colors duration-150 hover:text-fg"
+          className="rounded-full text-xs text-faint transition-colors duration-150 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           onClick={onCancel}
         >
           Click anywhere or press Esc to cancel
@@ -580,7 +673,7 @@ function Overlay({
         className="absolute inset-0 bg-bg/70"
         onClick={onClose}
       />
-      <div className="relative z-10 w-full max-w-lg px-3 pb-3 sm:pb-0">{children}</div>
+      <div className="relative z-10 w-full max-w-lg px-4 pb-4 sm:pb-0">{children}</div>
     </div>
   );
 }
@@ -610,7 +703,7 @@ function SoundSettings({
           aria-label={settings.sound ? "Mute the chime" : "Unmute the chime"}
           title={settings.sound ? "Mute" : "Unmute"}
           className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-full transition-colors duration-150",
+            "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
             settings.sound
               ? "bg-surface-2 text-fg hover:bg-border"
               : "bg-surface-2 text-faint hover:text-muted",
@@ -630,7 +723,7 @@ function SoundSettings({
           <div className="text-sm text-fg">Chime when a scan finishes</div>
           <div className="text-xs text-faint">For a scan left running in another tab</div>
         </div>
-        <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted">
+        <span className="w-11 shrink-0 text-right text-xs tabular-nums text-muted">
           {settings.sound ? `${Math.round(settings.volume * 100)}%` : "off"}
         </span>
       </div>
@@ -645,14 +738,14 @@ function SoundSettings({
         onCommit={() => preview({})}
       />
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-3 flex flex-wrap gap-2">
         {CHIME_NAMES.map((c) => (
           <button
             key={c.id}
             type="button"
             disabled={!settings.sound}
             className={cn(
-              "h-8 rounded-full px-3 text-xs font-medium transition-colors duration-150 disabled:opacity-40",
+              "h-11 rounded-full px-4 text-xs font-medium transition-colors duration-150 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
               settings.chime === c.id
                 ? "bg-fg text-bg"
                 : "bg-surface-2 text-muted hover:text-fg",
@@ -683,26 +776,21 @@ function SettingsPanel({
         <h2 className="text-base font-medium text-fg">Settings</h2>
         <button
           type="button"
-          className="flex size-11 items-center justify-center rounded-full text-muted hover:text-fg"
+          aria-label="Close"
+          className="flex size-11 items-center justify-center rounded-full text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           onClick={onClose}
         >
           <X size={18} />
         </button>
       </div>
-      <label className="mb-1.5 block text-sm text-muted">Google Sheet</label>
+      <label className="mb-2 block text-sm text-muted">Chart host</label>
       <Input
-        value={settings.sheetUrl}
-        onChange={(e) => onChange({ sheetUrl: e.target.value })}
-        placeholder="https://docs.google.com/spreadsheets/d/…"
+        value={settings.chartHost ?? ""}
+        onChange={(e) => onChange({ chartHost: e.target.value })}
+        placeholder={DEFAULT_CHART_HOST}
         spellCheck={false}
       />
       <div className="mt-2">
-        <Toggle
-          checked={settings.sheetSameTab}
-          onChange={(v) => onChange({ sheetSameTab: v })}
-          name="Open the sheet in this tab"
-          why="Off opens a new tab and leaves this one behind"
-        />
         <Toggle
           checked={settings.deriveAvatar}
           onChange={(v) => onChange({ deriveAvatar: v })}
@@ -718,7 +806,7 @@ function SettingsPanel({
       </div>
       <SoundSettings settings={settings} onChange={onChange} />
 
-      <div className="mt-4">
+      <div className="mt-4 flex justify-end">
         <Button
           variant="primary"
           onClick={() => {
@@ -731,6 +819,101 @@ function SettingsPanel({
           {saved ? "Saved" : "Save"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+type LogLevel = "log" | "info" | "warn" | "error" | "debug";
+type LogEntry = { at: number; level: LogLevel; text: string };
+
+function formatLogArg(arg: unknown): string {
+  if (typeof arg === "string") return arg;
+  if (arg instanceof Error) return arg.stack || `${arg.name}: ${arg.message}`;
+  try {
+    return JSON.stringify(arg) ?? String(arg);
+  } catch {
+    return String(arg);
+  }
+}
+
+function barsUrl(
+  host: string | undefined,
+  dexId: string,
+  chain: string,
+  pool: string,
+  quote: string,
+): string {
+  const path = `${encodeURIComponent(dexId)}/bars/${encodeURIComponent(chain)}/${encodeURIComponent(pool)}`;
+  const q = quote ? `&q=${encodeURIComponent(quote)}` : "";
+  // Pasted with or without the scheme and trailing slash.
+  const h = (host ?? "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "") || DEFAULT_CHART_HOST;
+  return `https://${h}/dex/chart/amm/v3/${path}?res=15&cb=2${q}`;
+}
+
+function ConsolePanel({
+  entries,
+  onClear,
+  onClose,
+}: {
+  entries: LogEntry[];
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="rounded-3xl bg-surface p-5 shadow-panel">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-base font-medium text-fg">Console</h2>
+        <div className="flex items-center gap-1">
+          {entries.length ? (
+            <Button variant="ghost" onClick={onClear}>
+              Clear
+            </Button>
+          ) : null}
+          <button
+            type="button"
+            aria-label="Close"
+            className="flex size-11 items-center justify-center rounded-full text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        </div>
+      </div>
+      {entries.length ? (
+        <ul className="max-h-[60dvh] space-y-2 overflow-y-auto font-mono text-xs">
+          {entries.map((e, i) => (
+            <li key={`${e.at}-${i}`} className="flex gap-2">
+              <span className="shrink-0 text-muted">
+                {new Date(e.at).toLocaleTimeString()}
+              </span>
+              <button
+                type="button"
+                title="Copy"
+                className={cn(
+                  "min-w-0 whitespace-pre-wrap break-all rounded-xl text-left hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                  e.level === "error"
+                    ? "text-danger"
+                    : e.level === "warn"
+                      ? "text-warn"
+                      : "text-fg",
+                )}
+                onClick={() => {
+                  navigator.clipboard.writeText(e.text).then(
+                    () => toast.success("Copied"),
+                    () => toast.error("Copy failed"),
+                  );
+                }}
+              >
+                {e.text}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted">
+          Nothing logged yet. Logs, errors and chart bars URLs show up here.
+        </p>
+      )}
     </div>
   );
 }
@@ -756,6 +939,7 @@ function Toggle({
       />
       <span
         className={cn(
+          // Half step kept: it sets the 24px track against the 20px first line.
           "relative mt-0.5 h-6 w-10 shrink-0 rounded-full transition-colors duration-150",
           checked ? "bg-fg" : "bg-surface-2 shadow-ring",
         )}
@@ -784,11 +968,12 @@ function InstallPanel({ onClose }: { onClose: () => void }) {
   ];
   return (
     <div className="rounded-3xl bg-surface p-5 shadow-panel">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <h2 className="text-base font-medium text-fg">Chrome extension</h2>
         <button
           type="button"
-          className="flex size-11 items-center justify-center rounded-full text-muted hover:text-fg"
+          aria-label="Close"
+          className="flex size-11 items-center justify-center rounded-full text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           onClick={onClose}
         >
           <X size={18} />
@@ -797,7 +982,7 @@ function InstallPanel({ onClose }: { onClose: () => void }) {
       <p className="mb-4 text-sm leading-relaxed text-muted">
         Same capture as this app, on the live page. Nothing runs until you press Scan.
       </p>
-      <ol className="mb-5 space-y-2.5 text-sm leading-relaxed text-muted">
+      <ol className="mb-5 space-y-3 text-sm leading-relaxed text-muted">
         {steps.map((s, i) => (
           <li key={s} className="flex gap-3">
             <span className="w-4 shrink-0 tabular-nums text-faint">{i + 1}</span>
@@ -808,7 +993,7 @@ function InstallPanel({ onClose }: { onClose: () => void }) {
       <a
         href={`${import.meta.env.BASE_URL}xcap-extension.zip`}
         download="xcap-extension.zip"
-        className="inline-flex h-11 items-center gap-2 rounded-full bg-fg px-4 font-sans text-sm font-medium text-bg hover:bg-white"
+        className="inline-flex h-11 items-center gap-2 rounded-full bg-fg px-4 font-sans text-sm font-medium text-bg hover:bg-fg-hover"
       >
         <Download size={16} />
         Download extension

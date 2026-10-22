@@ -72,26 +72,25 @@ export type ScanErr = {
 export type ScanResult = ScanOk | ScanErr;
 
 export type Settings = {
-  sheetUrl: string;
-  sheetSameTab: boolean;
   deriveAvatar: boolean;
   nativeAsUcid: boolean;
   sound: boolean;
   /** 0-1, as the slider reports it. */
   volume: number;
   chime: ChimeName;
+  /** Host that serves chart bars; DexScreener has moved it before. */
+  chartHost: string;
 };
 
+export const DEFAULT_CHART_HOST = "feed.dexscreener.com";
+
 export const DEFAULT_SETTINGS: Settings = {
-  // No sheet by default: the destination is the operator's own, and one
-  // baked in here would ship in every build and every extension zip.
-  sheetUrl: "",
-  sheetSameTab: false,
   deriveAvatar: true,
   nativeAsUcid: true,
   sound: true,
   volume: 0.9,
   chime: "chime",
+  chartHost: DEFAULT_CHART_HOST,
 };
 
 export const DEX_COLUMNS = [

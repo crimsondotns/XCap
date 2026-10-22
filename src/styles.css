@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500&display=swap");
 @import "tailwindcss";
 @source "./**/*.{ts,tsx}";
 @source "../spa/**/*.{ts,tsx}";
@@ -17,8 +17,13 @@
   --color-border: #38383f;
   --color-ok: #b8d4b0;
   --color-warn: #d4b8b0;
+  /* Destructive text, focus ring and the primary button's hover. */
+  --color-danger: #f0a39a;
+  --color-ring: #f5f5f7;
+  --color-fg-hover: #ffffff;
 
-  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    "Leelawadee UI", Thonburi, "Noto Sans Thai", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   --radius-sm: 0.5rem;
@@ -51,6 +56,11 @@
   body {
     background: var(--color-bg);
     color: var(--color-fg);
+  }
+
+  /* Thai stacks vowels and tone marks above and below; give them room. */
+  :lang(th) body {
+    line-height: 1.7;
   }
 
   button:not(:disabled),

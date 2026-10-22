@@ -1,4 +1,4 @@
-import { Link2, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,7 @@ function Field({
   if (!value && !hint) return null;
   return (
     <div className="flex items-start gap-2 py-1">
+      {/* Half step kept: it lines the 12px label up with the 14px value. */}
       <span className="w-16 shrink-0 pt-0.5 text-xs text-muted">{label}</span>
       {value ? (
         // The value is the button: an address is what the eye goes to and
@@ -132,7 +133,7 @@ function CoinCard({ overview, rows }: { overview: Overview; rows: ScanRow[] }) {
       >
         <Preview overview={overview} />
       </button>
-      <div className="px-3 pb-2 pt-1">
+      <div className="px-4 pb-3 pt-1">
         {contracts.map((row, i) => (
           <Field
             key={`${row.platformId}-${row.tokenAddress}-${i}`}
@@ -157,12 +158,15 @@ function Preview({ overview }: { overview: Overview }) {
       <div className="flex items-center gap-3 px-4 py-3">
         <Avatar src={overview.image} symbol={overview.symbol} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm text-muted">
+          <h2
+            className="truncate text-sm font-normal text-muted"
+            title={`${overview.name || overview.symbol}${overview.symbol ? ` (${overview.symbol})` : ""}`}
+          >
             {overview.name || overview.symbol}
             {overview.symbol ? ` (${overview.symbol})` : ""}
-          </div>
+          </h2>
           <div className="flex items-baseline gap-2">
-            <span className="truncate text-lg font-medium tracking-tight text-fg">
+            <span className="truncate text-xl font-medium tracking-tight text-fg">
               {formatPrice(overview.priceUsd)}
             </span>
             {change != null ? (
@@ -172,8 +176,9 @@ function Preview({ overview }: { overview: Overview }) {
                   change >= 0 ? "text-ok" : "text-warn",
                 )}
               >
-                {change >= 0 ? "+" : ""}
-                {change.toFixed(2)}%
+                {/* The sign carries the direction too, not the colour alone. */}
+                {change >= 0 ? "▲ +" : "▼ −"}
+                {Math.abs(change).toFixed(2)}%
               </span>
             ) : null}
           </div>
@@ -229,9 +234,9 @@ function Stat({
   return (
     // The browser's own tooltip: nothing to position, nothing to clip, and it
     // behaves the way every other tooltip on the machine does.
-    <div className="px-3 py-2.5 text-center" title={hint}>
-      <div className="text-[10px] uppercase tracking-wider text-faint">{label}</div>
-      <div className="mt-0.5 truncate text-sm tabular-nums text-fg">{value}</div>
+    <div className="px-3 py-3 text-center" title={hint}>
+      <div className="text-xs text-faint">{label}</div>
+      <div className="mt-1 truncate text-sm tabular-nums text-fg">{value}</div>
     </div>
   );
 }
@@ -244,7 +249,7 @@ function DexEmbed({ chain, pool }: { chain: string; pool: string }) {
     // A gentler radius than the cards around it: DexScreener draws its own
     // header flush to the top corners of the frame, so anything rounder eats
     // the token name out of it.
-    <div className="relative mb-3 w-full overflow-hidden rounded-lg bg-black pt-[48%] shadow-ring">
+    <div className="relative mb-3 w-full overflow-hidden aspect-[25/12] rounded-xl bg-bg shadow-ring">
       <iframe
         title="DexScreener"
         src={src}
@@ -260,7 +265,6 @@ export function Results({
   settings,
   extensionVersion,
   onClear,
-  onOpenSheet,
 }: {
   result: ScanOk;
   settings: Settings;
@@ -269,7 +273,6 @@ export function Results({
   // "no extension is listening".
   extensionVersion?: string | null;
   onClear: () => void;
-  onOpenSheet: (text: string) => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -303,7 +306,7 @@ export function Results({
             {rows.map((row, i) => (
               <li
                 key={rowKey(row, i)}
-                className="rounded-2xl bg-surface px-3 py-3"
+                className="rounded-2xl bg-surface p-4"
               >
                 {isCmc(row) ? (
                   <>
@@ -318,7 +321,10 @@ export function Results({
                         <div className="truncate text-sm font-medium text-fg">
                           {row.symbol || "—"}
                         </div>
-                        <div className="truncate text-xs text-muted">
+                        <div
+                          className="truncate text-xs text-muted"
+                          title={`${row.platformName || "Native"}${row.slug ? ` · ${row.slug}` : ""}${row.id != null ? ` · #${row.id}` : ""}`}
+                        >
                           {row.platformName || "Native"}
                           {row.slug ? ` · ${row.slug}` : ""}
                           {row.id != null ? ` · #${row.id}` : ""}
@@ -342,7 +348,10 @@ export function Results({
                         <div className="truncate text-sm font-medium text-fg">
                           {row.symbol || "—"}
                         </div>
-                        <div className="truncate text-xs text-muted">
+                        <div
+                          className="truncate text-xs text-muted"
+                          title={`${row.dexId} · ${row.chain}`}
+                        >
                           {row.dexId} · {row.chain}
                         </div>
                       </div>
@@ -387,15 +396,12 @@ export function Results({
           {copied === "json" ? "Copied" : "JSON"}
         </Button>
         <Button
-          variant="primary"
-          size="sm"
+          size="icon"
+          variant="ghost"
           className="ml-auto"
-          onClick={() => onOpenSheet(tsv)}
+          title="Clear captured rows"
+          onClick={onClear}
         >
-          <Link2 size={14} />
-          Copy to sheet
-        </Button>
-        <Button size="icon" variant="ghost" title="Clear captured rows" onClick={onClear}>
           <Trash2 size={16} />
         </Button>
       </div>

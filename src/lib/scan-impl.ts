@@ -8,6 +8,7 @@ import type {
   Source,
   SourcePref,
 } from "./types";
+import { DEFAULT_CHART_HOST } from "./types";
 
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -229,8 +230,8 @@ async function chartDexAnswers(
     `/dex/chart/amm/v3/${encodeURIComponent(dexId)}/bars/${encodeURIComponent(chain)}/${encodeURIComponent(pool)}` +
     `?res=1440&cb=2&q=${encodeURIComponent(quote)}`;
   const urls = isBrowser()
-    ? [`https://io.dexscreener.com${path}`]
-    : [`https://io.dexscreener.com${path}`, `https://r.jina.ai/http://io.dexscreener.com${path}`];
+    ? [`https://${DEFAULT_CHART_HOST}${path}`]
+    : [`https://${DEFAULT_CHART_HOST}${path}`, `https://r.jina.ai/http://${DEFAULT_CHART_HOST}${path}`];
   for (const url of urls) {
     try {
       const body = await fetchText(url, 8000);

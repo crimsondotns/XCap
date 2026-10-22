@@ -12,11 +12,6 @@ var __XCAP_EXTENSION = true;
 (() => {
     // ─────────────────────────── CONFIG ───────────────────────────
     const CONFIG = {
-        // Where the "Open Sheet" button goes. Copy first, then click it.
-        sheetUrl: '',
-
-        // Open the sheet in this tab (true) or a new one (false).
-        sheetSameTab: false
     };
     // ──────────────────────────────────────────────────────────────
 
@@ -45,28 +40,30 @@ var __XCAP_EXTENSION = true;
 
     const RE = /\/dex\/chart\/.*?\/([^\/]+)\/bars\/([^\/]+)\/([^\/?#]+)/;
     const DETAIL_RE = /\/pair-details\//i;
-    const MONO = 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
-    const SANS = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+    const MONO = '"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,"Leelawadee UI",Thonburi,"Noto Sans Thai",monospace';
+    const SANS = '"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI","Leelawadee UI",Thonburi,"Noto Sans Thai",sans-serif';
 
-    const CSS_PANEL = 'position:fixed;top:16px;right:16px;z-index:2147483647;width:440px;'
-        + 'max-height:82vh;overflow:auto;background:#fff;color:#000;border:2px solid #000;'
-        + 'box-shadow:0 8px 32px rgba(0,0,0,.35);font-family:' + SANS + ';font-size:12px;'
+    const CSS_PANEL = 'position:fixed;top:16px;right:16px;z-index:2147483647;width:440px;max-width:calc(100vw - 32px);'
+        + 'max-height:82vh;overflow:auto;background:#0d0d0e;color:#f5f5f7;border:none;border-radius:24px;'
+        + 'box-shadow:0 0 0 1px rgba(255,255,255,.12),0 24px 64px rgba(0,0,0,.55);font-family:' + SANS + ';font-size:13px;'
         + 'text-align:left;box-sizing:border-box;';
     const CSS_HEAD = 'display:flex;align-items:center;justify-content:space-between;gap:8px;'
-        + 'padding:10px 12px;background:#000;color:#fff;cursor:move;position:sticky;top:0;'
-        + 'font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;';
-    const CSS_BTN = 'display:inline-block;padding:5px 10px;background:#000;color:#fff;'
-        + 'border:1px solid #000;border-radius:0;font-family:' + SANS + ';font-size:10px;'
-        + 'font-weight:700;letter-spacing:.5px;text-transform:uppercase;cursor:pointer;'
-        + 'line-height:1;margin:0;box-sizing:border-box;';
-    const CSS_VAL = 'margin:3px 0 7px;padding:6px 8px;background:#f5f5f5;border:1px solid #ddd;'
-        + 'font-family:' + MONO + ';font-size:10px;line-height:1.45;word-break:break-all;'
+        + 'padding:12px 16px;background:#0d0d0e;color:#f5f5f7;cursor:move;position:sticky;top:0;'
+        + 'font-size:13px;font-weight:500;letter-spacing:0;text-transform:none;';
+    const CSS_BTN = 'display:inline-block;padding:12px 16px;background:#232326;color:#f5f5f7;'
+        + 'border:none;border-radius:999px;font-family:' + SANS + ';font-size:13px;'
+        + 'font-weight:500;letter-spacing:0;text-transform:none;cursor:pointer;'
+        + 'line-height:1.25;margin:0;box-sizing:border-box;';
+    const CSS_VAL = 'margin:4px 0 8px;padding:8px 12px;background:#1a1a1c;border:none;border-radius:12px;color:#f5f5f7;'
+        + 'font-family:' + MONO + ';font-size:12px;line-height:1.5;word-break:break-all;'
         + 'max-height:66px;overflow:auto;';
-    const CSS_TAG = 'font-size:9px;font-weight:700;letter-spacing:.5px;color:#666;text-transform:uppercase;';
+    const CSS_TAG = 'font-size:12px;font-weight:500;letter-spacing:0;color:#91919b;text-transform:none;';
 
     // cs is deliberately not here: it is shown in the panel and the JSON, but
     // is not one of the sheet's columns.
     const COLUMNS = ['Symbol', 'ChainID', 'DexID', 'Quote', 'Contract', 'Pool Address'];
+    // The popup draws the results; the in-page panel stays for __chart only.
+    const PANEL_IN_PAGE = false;
 
     const found = new Map();    // pool identity -> best chart request for that pool
     const seen = [];            // every chart URL, in order
@@ -148,7 +145,16 @@ var __XCAP_EXTENSION = true;
         try { window.parent.postMessage(payload, '*'); } catch (e) { /* ignore */ }
     }
 
+    // Every bars request, repeats included, for the page's console.
+    function forwardBars(raw) {
+        if (!IN_FRAME || !raw || !RE.test(String(raw))) return;
+        try {
+            window.parent.postMessage({ source: 'xcap', type: 'net', url: String(raw) }, '*');
+        } catch (e) { /* ignore */ }
+    }
+
     function add(raw) {
+        forwardBars(raw);
         const hit = parse(raw);
         if (!hit) return;
         seen.push(hit.rawUrl);
@@ -522,16 +528,16 @@ var __XCAP_EXTENSION = true;
     const THEME = `
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     .panel {
-        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-        --bg: #0a0a0a;
-        --bg-head: #0a0a0a;
-        --bg-sub: #141414;
-        --line: #2a2a2c;
-        --line-soft: #2a2a2c;
-        --fg: #f4f4f5;
-        --fg-dim: #8b8b90;
-        --fg-faint: #636369;
+        --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Leelawadee UI", Thonburi, "Noto Sans Thai", sans-serif;
+        --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        --bg: #0d0d0e;
+        --bg-head: #0d0d0e;
+        --bg-sub: #1a1a1c;
+        --surface-2: #232326;
+        --line: rgba(255,255,255,.12);
+        --fg: #f5f5f7;
+        --fg-dim: #aeaeb6;
+        --fg-faint: #91919b;
         font-family: var(--sans);
         font-size: 13px;
         line-height: 1.5;
@@ -539,7 +545,7 @@ var __XCAP_EXTENSION = true;
         background: var(--bg);
         border: none;
         border-radius: 24px;
-        box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 24px 64px rgba(0,0,0,.55);
+        box-shadow: 0 0 0 1px var(--line), 0 24px 64px rgba(0,0,0,.55);
         display: flex;
         flex-direction: column;
         max-height: 84vh;
@@ -547,7 +553,7 @@ var __XCAP_EXTENSION = true;
     }
     .head {
         display: flex; align-items: center; gap: 8px;
-        padding: 9px 10px;
+        padding: 8px 8px 8px 16px;
         background: var(--bg-head);
         border-bottom: 1px solid var(--line);
         cursor: grab; user-select: none; flex: 0 0 auto;
@@ -571,26 +577,26 @@ var __XCAP_EXTENSION = true;
         cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
     }
     .ibtn {
-        width: 36px; height: 36px; color: var(--fg-dim);
+        width: 44px; height: 44px; color: var(--fg-dim);
         border-color: transparent; transition: color .12s, background .12s;
     }
-    .ibtn:hover { color: var(--fg); background: #1c1c1c; }
-    .ibtn.on { color: #0a0a0a; background: var(--fg); }
+    .ibtn:hover { color: var(--fg); background: var(--surface-2); }
+    .ibtn.on { color: var(--bg); background: var(--fg); }
 
     .strip {
-        display: flex; align-items: center; gap: 6px;
-        padding: 6px 10px; background: var(--bg-sub);
-        border-bottom: 1px solid var(--line-soft);
-        font-size: 11px; color: var(--fg-dim); flex: 0 0 auto;
+        display: flex; align-items: center; gap: 8px;
+        padding: 8px 16px; background: var(--bg-sub);
+        border-bottom: 1px solid var(--line);
+        font-size: 12px; color: var(--fg-dim); flex: 0 0 auto;
     }
     .strip .k { color: var(--fg); }
     .strip svg { flex: 0 0 auto; color: var(--fg-faint); }
 
     .search {
         display: flex; align-items: center; gap: 8px;
-        margin: 8px 10px; padding: 0 12px; height: 40px; flex: 0 0 auto;
-        background: #141414; border: none; border-radius: 999px;
-        box-shadow: 0 0 0 1px rgba(255,255,255,.08);
+        margin: 8px 16px; padding: 0 16px; height: 44px; flex: 0 0 auto;
+        background: var(--bg-sub); border: none; border-radius: 999px;
+        box-shadow: 0 0 0 1px var(--line);
     }
     .search svg { color: var(--fg-faint); flex: 0 0 auto; }
     .search input {
@@ -600,97 +606,97 @@ var __XCAP_EXTENSION = true;
     }
     .search input::placeholder { color: var(--fg-faint); }
     .search .hits {
-        flex: 0 0 auto; font-size: 10px; color: var(--fg-faint);
+        flex: 0 0 auto; font-size: 12px; color: var(--fg-faint);
         font-variant-numeric: tabular-nums;
     }
     .search .clear {
         flex: 0 0 auto; width: 20px; height: 20px; color: var(--fg-faint);
     }
     .search .clear:hover { color: var(--fg); }
-    .search:focus-within { background: #0f0f13; }
+    .search:focus-within { background: var(--surface-2); }
     .search:focus-within svg { color: var(--fg-dim); }
 
     .body { overflow: auto; flex: 1 1 auto; }
     .body::-webkit-scrollbar { width: 10px; height: 10px; }
-    .body::-webkit-scrollbar-thumb { background: #26262b; border: 3px solid var(--bg); }
+    .body::-webkit-scrollbar-thumb { background: var(--surface-2); border: 3px solid var(--bg); }
     .body::-webkit-scrollbar-track { background: var(--bg); }
 
     table { width: 100%; border-collapse: collapse; }
     thead th {
         position: sticky; top: 0; z-index: 1;
         background: var(--bg-sub);
-        padding: 6px 10px; text-align: left;
-        font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none;
+        padding: 8px 16px; text-align: left;
+        font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none;
         color: var(--fg-dim);
         border-bottom: 1px solid var(--line);
         white-space: nowrap;
     }
     tbody td {
-        padding: 8px 10px; vertical-align: middle;
-        border-bottom: 1px solid var(--line-soft);
+        padding: 8px 16px; vertical-align: middle;
+        border-bottom: 1px solid var(--line);
         font-size: 12px;
     }
-    tbody tr:hover td { background: #141418; }
+    tbody tr:hover td { background: var(--bg-sub); }
     tbody tr:last-child td { border-bottom: none; }
     td.num { text-align: right; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
-    td.act { width: 34px; text-align: right; padding-left: 0; }
+    td.act { width: 44px; text-align: right; padding-left: 0; }
 
     .token { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .token img {
         width: 18px; height: 18px; border-radius: 50%;
-        background: #1a1a1e; flex: 0 0 auto;
+        background: var(--surface-2); flex: 0 0 auto;
     }
     .token .names { min-width: 0; overflow: hidden; }
-    .token .sym { font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
+    .token .sym { font-weight: 500; letter-spacing: 0; white-space: nowrap; }
     .token .sub {
-        font-size: 10px; color: var(--fg-faint); letter-spacing: .04em;
+        font-size: 12px; color: var(--fg-faint); letter-spacing: 0;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     tbody td:first-child { min-width: 132px; }
-    .clip { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; }
+    .clip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
     .dim { color: var(--fg-dim); }
     .faint { color: var(--fg-faint); }
 
-    .rows { padding: 2px 0; }
-    .field { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); }
+    .rows { padding: 4px 0; }
+    .field { padding: 8px 16px; border-bottom: 1px solid var(--line); }
     .field .lab {
         display: flex; align-items: center; justify-content: space-between; gap: 8px;
-        font-size: 11px; letter-spacing: 0; text-transform: none; color: var(--fg-dim);
-        margin-bottom: 5px;
+        font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--fg-dim);
+        margin-bottom: 4px;
     }
     .field .val {
-        background: #141414; border: none; border-radius: 12px;
-        padding: 8px 10px; font-size: 11px; line-height: 1.55;
+        background: var(--bg-sub); border: none; border-radius: 12px;
+        padding: 8px 12px; font-size: 12px; line-height: 1.5;
         font-family: var(--mono);
         word-break: break-all; max-height: 72px; overflow: auto; color: var(--fg);
-        box-shadow: 0 0 0 1px rgba(255,255,255,.08);
+        box-shadow: 0 0 0 1px var(--line);
     }
-    .kv { display: flex; gap: 10px; padding: 4px 0; font-size: 12px; align-items: flex-start; }
+    .kv { display: flex; gap: 12px; padding: 4px 0; font-size: 12px; align-items: flex-start; }
     .kv .k { flex: 0 0 72px; color: var(--fg-dim); padding-top: 1px; }
-    .kv .v { flex: 1 1 auto; word-break: break-all; font-family: var(--mono); font-size: 11px; }
+    .kv .v { flex: 1 1 auto; word-break: break-all; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 
     .foot {
         flex: 0 0 auto; border-top: 1px solid var(--line);
-        background: #141414; padding: 10px; display: flex; flex-direction: column; gap: 6px;
+        background: var(--bg-sub); padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;
     }
-    .bar { display: flex; gap: 6px; }
+    .bar { display: flex; gap: 8px; }
     .tbtn {
-        flex: 1 1 0; gap: 6px; height: 36px; padding: 0 12px;
-        border-color: transparent; color: var(--fg); background: #1c1c1c;
+        flex: 1 1 0; gap: 8px; height: 44px; padding: 0 16px;
+        border-color: transparent; color: var(--fg); background: var(--surface-2);
         letter-spacing: 0; text-transform: none; font-size: 13px; font-weight: 500;
         transition: color .12s, background .12s;
-        box-shadow: 0 0 0 1px rgba(255,255,255,.08);
+        box-shadow: 0 0 0 1px var(--line);
     }
-    .tbtn:hover { color: var(--fg); background: #242424; }
-    .tbtn.primary { background: var(--fg); color: #0a0a0a; box-shadow: none; }
+    .tbtn:hover { color: var(--fg); background: var(--bg-sub); }
+    .tbtn.primary { background: var(--fg); color: var(--bg); box-shadow: none; }
     .tbtn.primary:hover { background: #fff; }
-    .tbtn.narrow { flex: 0 0 auto; width: 36px; padding: 0; }
-    .tbtn.ok { color: #0a0a0a; background: var(--fg); }
+    .tbtn.narrow { flex: 0 0 auto; width: 44px; padding: 0; }
+    .tbtn.ok { color: var(--bg); background: var(--fg); }
 
-    .hint { padding: 8px 10px 10px; font-size: 10px; line-height: 1.7; color: var(--fg-faint); }
+    .hint { padding: 8px 16px 12px; font-size: 12px; line-height: 1.5; color: var(--fg-faint); }
     .empty {
-        padding: 22px 16px; text-align: center; color: var(--fg-dim);
-        font-size: 12px; line-height: 1.7;
+        padding: 24px 16px; text-align: center; color: var(--fg-dim);
+        font-size: 12px; line-height: 1.5;
     }
     .empty svg { color: var(--fg-faint); margin-bottom: 8px; }
     `;
@@ -946,31 +952,6 @@ var __XCAP_EXTENSION = true;
     }
 
 
-    // ---- sheet ----------------------------------------------------------
-
-    function openSheet() {
-        if (!CONFIG.sheetUrl) {
-            console.warn('[chart] no sheetUrl set - open the extension popup, or edit CONFIG above');
-            return;
-        }
-        if (CONFIG.sheetSameTab) location.href = CONFIG.sheetUrl;
-        else window.open(CONFIG.sheetUrl, '_blank', 'noopener');
-    }
-
-    // One click, both jobs. Order matters twice over: a popup blocker rejects
-    // window.open once an await has broken the chain back to the click, and
-    // navigating this tab away cancels a copy still in flight.
-    function copyAndOpenSheet(text, button) {
-        const done = writeClipboard(text);
-        if (CONFIG.sheetSameTab) done.then(openSheet, openSheet);
-        else openSheet();
-        done.then(
-            () => feedback(button, 'Copied', 'check', true),
-            () => feedback(button, 'Failed', 'alert', false)
-        );
-        return done;
-    }
-
     // ---- panel ----------------------------------------------------------
 
     const PANEL_ID = '__chart_panel';
@@ -1018,7 +999,7 @@ var __XCAP_EXTENSION = true;
         c.appendChild(urlField('Cleaned URL', h.cleanedUrl));
 
         const bar = el('div', 'bar');
-        bar.style.padding = '10px';
+        bar.style.padding = '12px 16px';
         bar.appendChild(copyBtn('TSV', 'sheet',
             'Tab-separated:\n' + COLUMNS.join(' / '), () => tsvOf(h)));
         bar.appendChild(copyBtn('JSON', 'braces', 'This pool as JSON', () => jsonOf(h)));
@@ -1031,7 +1012,8 @@ var __XCAP_EXTENSION = true;
     // hand-pasted script installed. Installed, it waits until it has
     // something to show rather than sitting on every page.
     function render(force) {
-        if (IN_FRAME) return;
+        // Results show in the extension popup now; nothing floats over the page.
+        if (IN_FRAME || !PANEL_IN_PAGE) return;
         const onPageRows = onPage();
         const rows = applyQuery(onPageRows);
         const hidden = listAll().length - onPageRows.length;
@@ -1103,10 +1085,6 @@ var __XCAP_EXTENSION = true;
         foot.appendChild(copyBar);
 
         const goBar = el('div', 'bar');
-        goBar.appendChild(textBtn('Copy + Open Sheet', 'link',
-            'Copies every row shown, then opens the sheet — just paste:\n'
-            + (CONFIG.sheetUrl || '(no sheet URL set)'),
-            b => copyAndOpenSheet(visible().map(tsvOf).join('\n'), b), 'primary'));
         goBar.appendChild(textBtn('', 'trash', 'Clear everything captured',
             () => { found.clear(); seen.length = 0; query = ''; render(true); }, 'narrow'));
         foot.appendChild(goBar);
@@ -1241,14 +1219,55 @@ var __XCAP_EXTENSION = true;
             'color:#000;font-weight:bold', 'color:#666');
     }
     const onShowRequest = () => { requestScan(); };
+    // Same sources, same order, as supplyFromDetails in src/lib/scan-impl.ts,
+    // so the popup and the web app agree on the figure.
+    function firstPositive(...vals) {
+        for (const v of vals) {
+            const n = Number(v);
+            if (v != null && v !== '' && Number.isFinite(n) && n > 0) return String(v).trim();
+        }
+        return '';
+    }
+    function supplyOf(h) {
+        const d = details.get(h.poolAddress.toLowerCase()) || {};
+        const su = d.su || {}, gp = d.gp || {}, cmc = d.cmc || {}, cg = d.cg || {};
+        return {
+            circulating: firstPositive(su.circulatingSupply, cmc.selfReportedCirculatingSupply,
+                cg.circulatingSupply),
+            total: firstPositive(su.totalSupply, gp.totalSupply, cg.totalSupply, cg.maxSupply)
+        };
+    }
+
+    // The popup asks for what has been captured; bridge.js reads the answer
+    // off this attribute right after dispatching, since events carry no reply.
+    const onSnapshotRequest = () => {
+        const rows = onPage().map(h => {
+            wantDetails(h);
+            const m = metaOf(h);
+            const supply = supplyOf(h);
+            return {
+                supply: supply.circulating, totalSupply: supply.total,
+                symbol: m.symbol, contract: m.contract, pending: m.pending,
+                chain: h.chain, dexId: h.protocol, quote: h.quoteToken,
+                pool: h.poolAddress, url: h.cleanedUrl, tsv: tsvOf(h)
+            };
+        });
+        try {
+            document.documentElement.setAttribute('data-xcap-snapshot', JSON.stringify({
+                listening: announce, rows: rows
+            }));
+        } catch (e) { /* torn down */ }
+    };
     const onNet = ev => { try { add(ev.detail); } catch (e) { /* ignore */ } };
     document.addEventListener('xcap:config', onStoredConfig);
     document.addEventListener('xcap:show', onShowRequest);
+    document.addEventListener('xcap:get', onSnapshotRequest);
     document.addEventListener('xcap:net', onNet);
 
     function uninstall() {
         document.removeEventListener('xcap:config', onStoredConfig);
         document.removeEventListener('xcap:show', onShowRequest);
+        document.removeEventListener('xcap:get', onSnapshotRequest);
         document.removeEventListener('xcap:net', onNet);
         clearTimeout(timer);
         window.fetch = origFetch;
@@ -1271,8 +1290,6 @@ var __XCAP_EXTENSION = true;
         all: () => [...seen],
         columns: () => COLUMNS.slice(),
         config: CONFIG,
-        openSheet,
-        copyAndOpen: () => copyAndOpenSheet(list().map(tsvOf).join('\n')),
         // the pair-details URLs that would be tried, in order
         detailUrls: () => list().map(h => detailUrls(h.chain, h.poolAddress)),
         // raw pair-details JSON, for checking what the site actually returned
@@ -1286,8 +1303,6 @@ var __XCAP_EXTENSION = true;
             const a = list().map(h => JSON.parse(jsonOf(h)));
             return JSON.stringify(a.length === 1 ? a[0] : a, null, 2);
         },
-        // tab-separated, one row per pool - paste straight into Google Sheets
-        sheets: () => list().map(tsvOf).join('\n'),
         tsv: () => list().map(tsvOf).join('\n'),
         clean: () => list().map(h => h.cleanedUrl).join('\n'),
         raw: () => list().map(h => h.rawUrl).join('\n'),

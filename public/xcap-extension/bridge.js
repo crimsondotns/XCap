@@ -5,8 +5,6 @@
  * cross on an attribute and requests cross as events.
  */
 const DEFAULTS = {
-    sheetUrl: '',
-    sheetSameTab: false,
     deriveAvatar: true,
     nativeAsUcid: true
 };
@@ -36,7 +34,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local') chrome.storage.local.get(DEFAULTS, publish);
 });
 
-chrome.runtime.onMessage.addListener(message => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // Only the top frame answers, or every chart iframe would race to reply.
+    if (message && message.type === 'xcap:get' && window === window.top) {
+        let snapshot = null;
+        try {
+            document.dispatchEvent(new Event('xcap:get'));   // handled synchronously
+            snapshot = JSON.parse(document.documentElement.getAttribute('data-xcap-snapshot') || 'null');
+        } catch (e) { /* no capture script, or torn down */ }
+        sendResponse(snapshot);
+        return;
+    }
     if (message && message.type === 'xcap:show') {
         document.dispatchEvent(new Event('xcap:show'));
     }

@@ -26,8 +26,6 @@ they load, but capture nothing.
 5. Pin it: puzzle-piece icon in the toolbar, then the pin next to
    *Chart & Token Capture*.
 
-6. Click the icon, check the **Google Sheet** URL, **Save**.
-
 Open a DexScreener pool page or a CoinMarketCap coin page. Press **Scan** in
 the toolbar popup — the panel does not open by itself, so the page stays clean.
 
@@ -77,8 +75,6 @@ without a reload.
 
 | Setting | Effect |
 | --- | --- |
-| Google Sheet | Where **Copy + Open Sheet** goes |
-| Open the sheet in this tab | Off opens a new tab and leaves the page behind it |
 | Build avatar URLs from the CMC id | Only when the page carries none of its own |
 | Native coins get UCID=&lt;id&gt; | BTC and the like have no contract for that column |
 
