@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+    @font-face { font-family: "Instrument Sans"; font-weight: 400; font-display: swap; src: url(fonts/instrument-sans-400.woff2) format("woff2"); }
+    @font-face { font-family: "Instrument Sans"; font-weight: 500; font-display: swap; src: url(fonts/instrument-sans-500.woff2) format("woff2"); }
+    @font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: url(fonts/ibm-plex-mono-400.woff2) format("woff2"); }
+    @font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-display: swap; src: url(fonts/ibm-plex-mono-500.woff2) format("woff2"); }
+    :root {
+        --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Leelawadee UI", Thonburi, "Noto Sans Thai", sans-serif;
+        --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Leelawadee UI", Thonburi, "Noto Sans Thai", monospace;
+        --bg: #0d0d0e;
+        --surface: #1a1a1c;
+        --surface-2: #232326;
+        --fg: #f5f5f7;
+        --muted: #aeaeb6;
+        --faint: #91919b;
+        --danger: #f0a39a;
+        --ring: 0 0 0 1px rgba(255,255,255,.12);
+        color-scheme: dark;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+        width: 360px;
+        font-family: var(--sans);
+        font-size: 13px;
+        line-height: 1.5;
+        background: var(--bg);
+        color: var(--fg);
+    }
+
+    header {
+        display: flex; align-items: center; gap: 8px;
+        padding: 16px 16px 12px;
+    }
+    header .mark { flex: 0 0 auto; display: flex; }
+    /* No native select: its open list is drawn by Chrome and ignores every
+       token. The trigger is the web app's outline Button (h-11 rounded-full
+       px-4 text-sm bg-surface shadow-ring); the list is a card of the same
+       surface, radius-xl (24px), with h-11 rows. */
+    .menu { position: relative; margin-left: auto; }
+    .menu > button {
+        flex: none; height: 44px; padding: 0 12px 0 16px; gap: 8px;
+        font-size: 14px; line-height: 1.6;
+    }
+    .menu > button {
+        color: var(--muted);
+        box-shadow: 0 0 0 1px rgba(255,255,255,.06), 0 2px 8px rgba(0,0,0,.16);
+    }
+    .menu > button svg { color: var(--faint); transition: transform .15s; }
+    .menu > button[aria-expanded="true"] svg { transform: rotate(180deg); }
+    .menu ul {
+        position: absolute; top: calc(100% + 8px); right: 0; z-index: 10;
+        min-width: 128px; padding: 4px; list-style: none;
+        background: var(--surface); border-radius: 24px;
+        /* No border, as on grok.com: a soft two-layer shadow alone lifts it. */
+        box-shadow: 0 2px 6px rgba(0,0,0,.16), 0 12px 32px rgba(0,0,0,.24);
+    }
+    .menu ul[hidden] { display: none; }
+    .menu li {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        height: 44px; padding: 0 12px 0 16px; border-radius: 999px;
+        font-size: 14px; font-weight: 500; color: var(--muted); cursor: pointer;
+        transition: background-color .15s, color .15s;
+    }
+    /* Low contrast on purpose: a faint wash for hover, muted text even when
+       chosen; the check mark says which one is picked. */
+    .menu li { color: var(--faint); }
+    .menu li:hover, .menu li.active { background: rgba(255,255,255,.04); color: var(--muted); }
+    .menu li[aria-selected="true"] { color: var(--muted); }
+    .menu li svg { color: var(--faint); }
+    .menu li svg { visibility: hidden; }
+    .menu li[aria-selected="true"] svg { visibility: visible; }
+    header h1 {
+        font-size: 14px; font-weight: 500;
+        letter-spacing: 0; text-transform: none; color: var(--fg);
+    }
+
+    .section { padding: 8px 16px 12px; }
+
+    label.lab {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 13px; color: var(--muted); margin-bottom: 8px;
+    }
+    label.lab svg { color: var(--faint); display: block; }
+    label.lab > span { display: inline-flex; align-items: center; }
+
+    :root:lang(th) body { line-height: 1.7; }
+    /* These set their own line-height, so the body rule misses them. */
+    :root:lang(th) :is(.why, input, footer, button, .menu li) { line-height: 1.7; }
+    body { line-break: auto; overflow-wrap: anywhere; }
+
+    input[type=text] {
+        width: 100%; height: 44px; padding: 0 16px;
+        background: var(--surface); color: var(--fg);
+        border: none; border-radius: 24px;
+        box-shadow: var(--ring);
+        font-family: var(--sans); font-size: 13px; line-height: 1.5;
+    }
+    input[type=text]:focus { outline: none; background: var(--surface-2); }
+    input[type=text]:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+    input[type=text]::placeholder { color: var(--faint); }
+
+    .toggle {
+        display: flex; align-items: flex-start; gap: 12px;
+        padding: 12px 0; cursor: pointer;
+    }
+    .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .box {
+        flex: 0 0 auto; width: 40px; height: 24px; margin-top: 1px;
+        border-radius: 999px; background: var(--surface-2);
+        box-shadow: var(--ring);
+        position: relative;
+        transition: background .15s;
+    }
+    .box::after {
+        content: "";
+        position: absolute; top: 2px; left: 2px;
+        width: 20px; height: 20px; border-radius: 999px;
+        background: var(--muted);
+        transition: transform .15s, background .15s;
+    }
+    .toggle input:checked + .box { background: var(--fg); box-shadow: none; }
+    .toggle input:checked + .box::after { transform: translateX(16px); background: var(--bg); }
+    .toggle input:focus-visible + .box { outline: 2px solid var(--fg); outline-offset: 2px; }
+    .toggle .text { min-width: 0; }
+    .toggle .name { display: block; font-size: 13px; color: var(--fg); }
+    .toggle .why { display: block; font-size: 12px; line-height: 1.5; color: var(--faint); }
+
+    .bar { display: flex; gap: 8px; padding: 8px 16px 12px; }
+    button {
+        flex: 1 1 0; height: 44px; gap: 8px;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-family: var(--sans); font-size: 13px; font-weight: 500;
+        letter-spacing: 0; text-transform: none;
+        background: var(--surface); color: var(--fg);
+        border: none; border-radius: 999px; cursor: pointer;
+        box-shadow: var(--ring);
+        transition: background .12s, color .12s;
+    }
+    /* The icon spans are inline, so without this the svg sits on the text
+       baseline and reads as badly padded rather than badly aligned. */
+    button > span { display: inline-flex; align-items: center; }
+    /* A fixed box for the glyph, so a wide icon and a tall one
+       (the disk) leave the same space beside their label. */
+    /* Only the icon slots (id="i-…"): a first span that holds text, like
+       Copy all's, would otherwise be squeezed to 16px and stack its letters. */
+    button > span[id^="i-"] {
+        width: 16px; height: 16px; justify-content: center; flex: 0 0 auto;
+    }
+    button svg { display: block; }
+    button:hover { background: var(--surface-2); }
+    button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+    button.primary { background: var(--fg); color: var(--bg); box-shadow: none; }
+    button.primary:hover { background: #fff; }
+    button.ok { background: var(--fg); color: var(--bg); }
+    button:disabled, button.primary:disabled {
+        background: var(--surface); color: var(--faint); cursor: not-allowed; box-shadow: var(--ring);
+    }
+
+    /* Results: the cards from the old in-page panel, redrawn on the popup's
+       tokens. Cards are radius-xl (24px) on surface, like the web app's. */
+    .results-head {
+        display: flex; align-items: center; gap: 8px;
+        padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--fg);
+    }
+    .results-head h2 { font-size: 13px; font-weight: 500; margin: 0; }
+    .results-head .count {
+        font: 500 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums;
+    }
+    #resultList {
+        list-style: none; display: flex; flex-direction: column; gap: 8px;
+        max-height: 320px; overflow-y: auto; padding: 0 16px;
+    }
+    .pool {
+        padding: 16px; border-radius: 24px; background: var(--surface);
+        box-shadow: 0 2px 8px rgba(0,0,0,.16);
+    }
+    .pool-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .pool .names { flex: 1; min-width: 0; }
+    .pool .sym {
+        font-size: 14px; font-weight: 500; color: var(--fg);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pool .sub { font-size: 12px; color: var(--muted); }
+    .pool .chip { flex: none; width: 44px; height: 44px; padding: 0; }
+    .kv { display: flex; gap: 12px; padding: 4px 0; font-size: 12px; }
+    .kv .k { flex: 0 0 80px; color: var(--muted); }
+    .kv .v { flex: 1; min-width: 0; color: var(--fg); }
+    .kv .v.empty { color: var(--muted); }
+    .kv .num { font-variant-numeric: tabular-nums; }
+    .kv .mono { font-family: var(--mono); word-break: break-all; font-variant-numeric: tabular-nums; }
+    #results .empty { padding: 16px 0; font-size: 12px; color: var(--muted); }
+    #results .bar { padding-top: 12px; }
+    #copyAll { width: 100%; }
+
+    /* The scrollbar keeps a 10px lane, but the thumb is drawn 4px thin
+       inside it (a transparent border, clipped). Chrome cannot resize the
+       bar on its own hover, so the thumb grows instead: pointing at it fills
+       the lane to a normal width. No scrollbar-width here: in Chrome it
+       would override these rules. */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+        background: rgba(255,255,255,.16); background-clip: padding-box;
+        border: 3px solid transparent; border-radius: 999px;
+    }
+    ::-webkit-scrollbar-thumb:hover,
+    ::-webkit-scrollbar-thumb:active {
+        background-color: rgba(255,255,255,.32); border-width: 1px;
+    }
+    ::-webkit-scrollbar-corner { background: transparent; }
+
+    #status {
+        display: flex; align-items: center; gap: 8px;
+        min-height: 16px; padding: 0 16px 12px;
+        font-size: 12px; color: var(--muted);
+    }
+    /* Codes are listed in ERRORS.md at the repo root. */
+    #status.error { color: var(--danger); }
+    #status code { font-family: var(--mono); color: var(--fg); }
+    #status.error code { color: inherit; }
+
+    footer {
+        padding: 12px 16px 16px;
+        font-size: 12px; line-height: 1.5; color: var(--faint);
+    }
+    footer b { color: var(--muted); font-weight: 500; }
+</style>
+</head>
+<body>
+    <header>
+        <span class="mark" id="mark"></span>
+        <h1>XCap</h1>
+        <div class="menu">
+            <button id="lang" type="button" aria-haspopup="listbox" aria-expanded="false"
+                    aria-controls="langList" aria-label="Language">
+                <span id="langLabel">ENG</span><span id="i-lang"></span>
+            </button>
+            <ul id="langList" role="listbox" aria-label="Language" tabindex="-1" hidden>
+                <li role="option" data-value="en">ENG</li>
+                <li role="option" data-value="th">TH</li>
+            </ul>
+        </div>
+    </header>
+
+    <div class="section">
+        <label class="toggle">
+            <input type="checkbox" id="deriveAvatar">
+            <span class="box"></span>
+            <span class="text">
+                <span data-i18n="avatar.name" class="name">Build avatar URLs from the CMC id</span>
+                <span data-i18n="avatar.why" class="why">Only when the page carries none of its own</span>
+            </span>
+        </label>
+
+        <label class="toggle">
+            <input type="checkbox" id="nativeAsUcid">
+            <span class="box"></span>
+            <span class="text">
+                <span class="name" data-i18n="ucid.name">Native coins get UCID=&lt;id&gt;</span>
+                <span data-i18n="ucid.why" class="why">BTC and the like have no contract for that column</span>
+            </span>
+        </label>
+    </div>
+
+    <div class="bar">
+        <button id="save"><span id="i-save"></span><span data-i18n="save">Save</span></button>
+        <button id="show" class="primary"><span id="i-show"></span><span data-i18n="scan">Scan</span></button>
+    </div>
+
+    <section id="results" aria-labelledby="resultsTitle" hidden>
+        <div class="results-head">
+            <h2 id="resultsTitle" data-i18n="pools">Pools captured</h2>
+            <span id="resultCount" class="count">0</span>
+        </div>
+        <ul id="resultList"></ul>
+        <div class="bar">
+            <button id="copyAll" type="button"><span data-i18n="copyAll">Copy all</span></button>
+        </div>
+    </section>
+
+    <div id="status"></div>
+
+    <footer data-i18n-html="footer">
+        The page stays clean. Open a <b>DexScreener</b> pool or a
+        <b>CoinMarketCap</b> coin, then press <b>Scan</b> — nothing is captured on load.
+    </footer>
+
+    <script src="popup.js"></script>
+</body>
+</html>
