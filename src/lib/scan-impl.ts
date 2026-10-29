@@ -8,7 +8,6 @@ import type {
   Source,
   SourcePref,
 } from "./types";
-import { DEFAULT_CHART_HOST } from "./types";
 
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -168,105 +167,51 @@ function parseCmcTarget(query: string): { slug?: string; id?: string } {
 
 // ---- DexID without the extension ---------------------------------------
 //
-// io.dexscreener charts a pool at /dex/chart/amm/v3/{dexId}/bars/{chain}/{pool},
-// and that {dexId} is its own adapter name, which the public API does not
-// report: the API says meteora where the chart says solamm, ramsesv3 where the
-// chart says uniswap. Capturing the URL needs a browser extension hooking the
-// chart Worker, so instead the candidates are tried against the endpoint and
-// the one that answers with bars is the real name.
+// The chart fetches /dex/chart/amm/v3/{adapter}/bars/{chain}/{pool}, and that
+// adapter is not the dexId the API reports (orca and raydium both chart as
+// solamm). DexScreener's own embed page carries it, in the pair data it
+// renders from:
+//   "pair":{"type":{"case":"typeAMM","value":{"a":"solamm",…}},…,"dexId":"orca"
+// so that is read instead of guessed. No hard mapping (CLAUDE.md): if the page
+// cannot be read, the column stays blank and the extension's chart hit fills
+// it later.
 
-/** Univ3 forks all chart under the uniswap adapter. */
-const UNISWAP_V3_ADAPTERS = new Set([
-  "uniswap", "ramses", "nile", "pharaoh", "cleopatra", "aerodrome", "velodrome",
-  "thruster", "camelot", "lynex", "swapx", "alienbase", "baseswap", "quickswap",
-  "sushiswap", "sushi", "spookyswap", "equalizer", "thena", "fusionx", "agni",
-  "thick", "kim", "hercules", "sparkdex", "kodiak", "superswap", "dackieswap",
-  "swapr", "zyberswap", "horizon", "swapbased",
-]);
+const EMBED_ADAPTER_RE = /"pair":\{"type":\{"case":"[A-Za-z]+","value":\{"a":"([a-z0-9._-]+)"/g;
 
-// Names the API reports, against the adapter the chart URL uses. Every entry
-// here has been read off a real /dex/chart/amm/v3/{adapter}/bars/ request -
-// a guessed one is worse than an empty column, because it looks right.
-//   meteora  -> DdMA1cHc… charts at /amm/v3/solamm/
-//   pumpswap -> CV2m2hK9… charts at /amm/v3/pumpfundex/
-const ADAPTER_ALIASES: Record<string, string[]> = {
-  meteora: ["solamm", "meteora"],
-  pumpswap: ["pumpfundex", "pumpswap"],
-  pumpfun: ["pumpfundex", "pumpfun"],
-};
-
-function normalizeDexId(raw: string): string {
-  return raw.toLowerCase().replace(/[\s_-]+/g, "");
-}
-
-/** Ordered guesses at the chart adapter name, best first. */
-export function chartDexCandidates(p: Record<string, unknown>): string[] {
-  const raw = normalizeDexId(str(p.dexId));
-  if (!raw) return [];
-  const labels = Array.isArray(p.labels) ? p.labels.map(str).map((s) => s.toLowerCase()) : [];
-  const base = raw.replace(/v[2-4]$/, "");
-  const isV4 = labels.includes("v4") || raw.endsWith("v4");
-
-  const out: string[] = [];
-  if (UNISWAP_V3_ADAPTERS.has(base) || UNISWAP_V3_ADAPTERS.has(raw)) {
-    out.push(isV4 ? "uniswapv4" : "uniswap");
+/** The chart adapter for `pool`, as DexScreener's embed page states it. */
+export function chartAdapterFromEmbed(html: string, pool: string): string {
+  // Compared lowercased on both sides: the key has a capital A.
+  const want = `"pairaddress":"${pool.toLowerCase()}"`;
+  for (const m of html.matchAll(EMBED_ADAPTER_RE)) {
+    // The page can list related pairs too: only take the block that names
+    // this pool, a little way after the adapter.
+    const block = html.slice(m.index, m.index + 600).toLowerCase();
+    if (block.includes(want)) return m[1];
   }
-  out.push(...(ADAPTER_ALIASES[base] ?? []));
-  out.push(raw, base);
-  const version = labels.find((l) => /^v\d/.test(l));
-  if (version && !raw.includes(version)) out.push(base + version);
-  return [...new Set(out.filter(Boolean))];
+  return "";
 }
 
-// A wrong adapter name is refused outright; the right one answers with a
-// protobuf body, which is binary and never short.
-async function chartDexAnswers(
-  dexId: string,
-  chain: string,
-  pool: string,
-  quote: string,
-): Promise<boolean> {
-  const path =
-    `/dex/chart/amm/v3/${encodeURIComponent(dexId)}/bars/${encodeURIComponent(chain)}/${encodeURIComponent(pool)}` +
-    `?res=1440&cb=2&q=${encodeURIComponent(quote)}`;
-  const urls = isBrowser()
-    ? [`https://${DEFAULT_CHART_HOST}${path}`]
-    : [`https://${DEFAULT_CHART_HOST}${path}`, `https://r.jina.ai/http://${DEFAULT_CHART_HOST}${path}`];
-  for (const url of urls) {
+async function resolveChartDexId(chain: string, pool: string): Promise<string> {
+  const url =
+    `https://dexscreener.com/${encodeURIComponent(chain)}/${encodeURIComponent(pool)}` +
+    "?embed=1";
+  // A browser has to borrow a proxy, and some return a rewritten page (r.jina.ai
+  // turns it into Markdown) that lost the data, so each is read in turn until
+  // one still has it. The value is DexScreener's either way: a proxy only
+  // carries it, it cannot make a wrong name pass.
+  const attempts = [
+    url,
+    ...(isBrowser() ? CORS_PROXIES.map((p) => p(url)) : []),
+  ];
+  for (const attempt of attempts) {
     try {
-      const body = await fetchText(url, 8000);
-      if (body && body.length > 250 && !/cannot get|not found/i.test(body.slice(0, 200))) {
-        return true;
-      }
-    } catch {
-      /* a refusal is an answer too: this name is not the one */
+      const adapter = chartAdapterFromEmbed(await fetchTextOnce(attempt, 10000), pool);
+      if (adapter) return adapter;
+    } catch (err) {
+      if (activeScan?.signal.aborted) throw err;
     }
   }
-  return false;
-}
-
-async function resolveChartDexId(
-  pair: Record<string, unknown>,
-  chain: string,
-  pool: string,
-  quote: string,
-): Promise<string> {
-  // Four round trips is already slow enough to notice; past that the guess
-  // is not worth the wait.
-  const candidates = chartDexCandidates(pair).slice(0, 4);
-  for (const id of candidates) {
-    if (await chartDexAnswers(id, chain, pool, quote)) return id;
-  }
-  // Cloudflare can refuse every probe, which says nothing about which name is
-  // right. A curated mapping is still a better answer than an empty column;
-  // an uncurated guess is not, so those stay blank.
-  const raw = normalizeDexId(str(pair.dexId));
-  const base = raw.replace(/v[2-4]$/, "");
-  const curated =
-    ADAPTER_ALIASES[base] !== undefined ||
-    UNISWAP_V3_ADAPTERS.has(base) ||
-    UNISWAP_V3_ADAPTERS.has(raw);
-  return curated ? (candidates[0] ?? "") : "";
+  return "";
 }
 
 function dexRowFromPair(p: Record<string, unknown>): DexRow {
@@ -504,7 +449,9 @@ function dexRowFromDetails(target: DexTarget, details: Record<string, unknown>):
     symbol: str(cms.symbol) || str(cmc.symbol) || str(td.tokenSymbol),
     name: str(cms.name) || str(cmc.name) || str(td.tokenName),
     chain: str(cms.chainId) || target.chain,
-    dexId: target.dexId || dexIdFromDetails(details),
+    // Only a pasted chart URL names the adapter; the site's display name
+    // (raydium, orca…) is not it.
+    dexId: target.dexId || "",
     quote: target.quote || "",
     // pair-details names the base token, never the quote.
     quoteSymbol: "",
@@ -532,8 +479,6 @@ async function fillSupply(rows: DexRow[], pairs: Record<string, unknown>[]): Pro
         const body = await fetchPairDetails(row.chain, row.poolAddress);
         if (body) {
           details = supplyFromDetails(body);
-          // The chart URL, when one was pasted, has already set this.
-          if (!row.dexId) row.dexId = dexIdFromDetails(body);
         }
       } catch {
         /* keep fallback */
@@ -614,14 +559,9 @@ async function scanDex(query: string): Promise<ScanResult> {
       }
     }
   } else if (rows[0] && pairs[0]) {
-    // Only the pool actually being looked at: probing every row would mean
-    // dozens of requests for a column read one row at a time.
-    rows[0].dexId = await resolveChartDexId(
-      pairs[0],
-      rows[0].chain,
-      rows[0].poolAddress,
-      rows[0].quote,
-    );
+    // Only the pool actually being looked at: the embed page is ~750 kB, too
+    // much to fetch for every row.
+    rows[0].dexId = await resolveChartDexId(rows[0].chain, rows[0].poolAddress);
   }
   await fillSupply(rows, pairs);
 

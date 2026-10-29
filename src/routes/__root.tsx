@@ -2,6 +2,7 @@ import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-r
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { Toaster } from "sonner";
+import { XCapApp } from "@/components/xcap-app";
 import appCss from "../styles.css?url";
 
 const APP_NAME = "XCap";
@@ -34,6 +35,10 @@ export const Route = createRootRoute({
       <body className="bg-bg text-fg font-sans">
         <PreviewHostBridge />
         <AuthProvider>
+          {/* Mounted here, not per route: /settings, /console and /install
+              are pages of the same app, and remounting it on every
+              navigation would drop the console log and the results. */}
+          <XCapApp />
           <Outlet />
         </AuthProvider>
         <Toaster

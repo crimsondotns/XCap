@@ -1,13 +1,4 @@
-import {
-  ArrowUp,
-  Check,
-  Download,
-  Settings2,
-  Terminal,
-  Volume2,
-  VolumeX,
-  X,
-} from "lucide-react";
+import { ArrowUp, Check, Download, Settings2, Terminal, Volume2, VolumeX, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CometSpinner } from "@/components/comet-spinner";
@@ -35,11 +26,33 @@ export function XCapApp() {
   const [source, setSource] = useState<Source>("cmc");
   const [query, setQuery] = useState("");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [panel, setPanel] = useState<"settings" | "install" | "console" | null>(null);
+  // Each page has its own URL (/settings, /console, /install). The app stays
+  // mounted across them, so console logs and results survive the trip.
+  const [panel, setPanelState] = useState<Page | null>(null);
+  // A result has its URL too: /<pool address> for DexScreener,
+  // /currencies/<slug> for CoinMarketCap. Kept in a ref as well, so the
+  // popstate handler (bound once) sees the current one.
+  const [resultPath, setResultPathState] = useState("");
+  const resultPathRef = useRef("");
+  function setResultPath(path: string) {
+    resultPathRef.current = path;
+    setResultPathState(path);
+  }
+  function go(path: string) {
+    if (pathRest() === path) return;
+    window.history.pushState(null, "", import.meta.env.BASE_URL + path);
+  }
+  function setPanel(next: Page | null) {
+    // Closing a dialog goes back to the result it was opened over.
+    go(next ?? resultPath);
+    setPanelState(next);
+  }
   // Chart bars requests the DexScreener frame saw, newest first.
   const [netLog, setNetLog] = useState<LogEntry[]>([]);
   // Bars URLs already logged, so a result updated by a chart hit adds nothing.
   const loggedBars = useRef(new Set<string>());
+  // An action that cannot be undone waits here until it is confirmed.
+  const [confirming, setConfirming] = useState<ConfirmRequest | null>(null);
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScanOk | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -206,8 +219,9 @@ export function XCapApp() {
     playChime(ok, { name: settings.chime, volume: settings.volume });
   }
 
-  async function scan() {
-    const q = query.trim();
+  async function scan(from?: { query: string; source: Source; path?: string }) {
+    const q = (from?.query ?? query).trim();
+    const src = from?.source ?? source;
     if (!q) {
       setError("Paste a URL, slug, or symbol first.");
       return;
@@ -220,7 +234,7 @@ export function XCapApp() {
     // gesture behind it and starts muted.
     if (settings.sound) primeChime();
     try {
-      const out = await executeScan(q, source);
+      const out = await executeScan(q, src);
       if (scanRun.current !== run) return;
       setHasScanned(true);
       if (!out.ok) {
@@ -236,8 +250,12 @@ export function XCapApp() {
         return;
       }
       chime(true);
+      // Opened from a URL: that URL stays, even if the best row is another pool.
+      const path = from?.path ?? resultPathOf(out);
+      setResultPath(path);
+      go(path);
       // Recorded only for a scan that found something: a typo is not history.
-      setHistory(rememberScan(q, source, out));
+      setHistory(rememberScan(q, src, out));
       // Only once rows came back: a failed or empty scan leaves the query in
       // place to be corrected rather than retyped.
       setQuery("");
@@ -250,6 +268,32 @@ export function XCapApp() {
       if (scanRun.current === run) setScanning(false);
     }
   }
+
+  // Opening a result URL (a link, a reload, Back/Forward) runs that scan: the
+  // address in the bar is the request. Pages open their dialog instead.
+  const scanRef = useRef(scan);
+  scanRef.current = scan;
+  useEffect(() => {
+    const sync = () => {
+      const rest = pathRest();
+      const page = (PAGES as readonly string[]).includes(rest) ? (rest as Page) : null;
+      setPanelState(page);
+      if (page || rest === resultPathRef.current) return;
+      if (!rest) {
+        setResultPath("");
+        setResult(null);
+        setError(null);
+        setHasScanned(false);
+        return;
+      }
+      const target = queryFromPath(rest);
+      setSource(target.source);
+      void scanRef.current({ ...target, path: rest });
+    };
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
 
   // A scan with nothing to show yet keeps the idle screen: the dialog covers
   // it, and "Nothing found" would be wrong for a scan still running.
@@ -265,9 +309,9 @@ export function XCapApp() {
               settings and history. */}
           <button
             type="button"
-            title="Reload XCap"
+            title="Back to start"
             className="-m-1 flex min-w-0 items-center gap-3 rounded-full p-1 transition-opacity duration-150 hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            onClick={() => window.location.reload()}
+            onClick={() => window.location.assign(import.meta.env.BASE_URL)}
           >
             <Mark size={32} />
             <h1 className="truncate text-sm font-medium text-fg">XCap</h1>
@@ -301,31 +345,40 @@ export function XCapApp() {
         </div>
       </header>
 
-      {panel === "settings" ? (
-        <Overlay onClose={() => setPanel(null)}>
-          <SettingsPanel
-            settings={settings}
-            onChange={updateSettings}
-            onClose={() => setPanel(null)}
-          />
-        </Overlay>
-      ) : null}
-      {panel === "console" ? (
-        <Overlay onClose={() => setPanel(null)}>
-          <ConsolePanel
-            entries={netLog}
-            onClear={() => setNetLog([])}
-            onClose={() => setPanel(null)}
-          />
-        </Overlay>
-      ) : null}
       {scanning ? (
         <ScanningDialog query={query} source={source} onCancel={cancelCurrentScan} />
       ) : null}
-      {panel === "install" ? (
+
+      {panel ? (
         <Overlay onClose={() => setPanel(null)}>
-          <InstallPanel onClose={() => setPanel(null)} />
+          {panel === "settings" ? (
+            <SettingsPanel
+              settings={settings}
+              onChange={updateSettings}
+              onClose={() => setPanel(null)}
+            />
+          ) : panel === "console" ? (
+            <ConsolePanel
+              entries={netLog}
+              onClear={() =>
+                setConfirming({
+                  title: "Clear the console?",
+                  body: "Every log line and bars URL captured so far is removed. They cannot be brought back.",
+                  action: "Clear console",
+                  run: () => setNetLog([]),
+                })
+              }
+              onClose={() => setPanel(null)}
+            />
+          ) : (
+            <InstallPanel onClose={() => setPanel(null)} />
+          )}
         </Overlay>
+      ) : null}
+
+      {/* Last of the overlays, so it sits above a page dialog it was opened from. */}
+      {confirming ? (
+        <ConfirmDialog request={confirming} onClose={() => setConfirming(null)} />
       ) : null}
 
       {/* The composer floats over this, so the last row has to clear it. */}
@@ -335,11 +388,20 @@ export function XCapApp() {
             result={result}
             settings={settings}
             extensionVersion={extensionVersion}
-            onClear={() => {
-              setResult(null);
-              setError(null);
-              setHasScanned(false);
-            }}
+            onClear={() =>
+              setConfirming({
+                title: "Clear these results?",
+                body: "The rows from this scan are removed. Scanning again is the only way to get them back.",
+                action: "Clear results",
+                run: () => {
+                  setResultPath("");
+                  go("");
+                  setResult(null);
+                  setError(null);
+                  setHasScanned(false);
+                },
+              })
+            }
           />
         ) : error ? (
           <IdleFrame>
@@ -354,10 +416,9 @@ export function XCapApp() {
                 Ready when you are.
               </h2>
               <p className="text-base leading-relaxed text-muted">
-                Paste a CoinMarketCap coin or a DexScreener pool. Nothing runs until you
-                send it.
+                Paste a CoinMarketCap coin or a DexScreener pool. Nothing runs until you send it.
               </p>
-              <p className="text-sm text-faint">กด Scan เมื่อพร้อม — ไม่สแกนอัตโนมัติ</p>
+              <p lang="th" className="text-sm text-faint">กด Scan เมื่อพร้อม — ไม่สแกนอัตโนมัติ</p>
             </div>
             {history.length ? (
               <History
@@ -366,8 +427,24 @@ export function XCapApp() {
                   setQuery(e.query);
                   setSource(e.source);
                 }}
-                onForget={(e) => setHistory(forgetScan(e.query))}
-                onClear={() => setHistory(clearHistory())}
+                onForget={(e) =>
+                  setConfirming({
+                    title: "Remove this scan?",
+                    // The chip's own name (PENGU/SOL), not the raw query: that can be
+                    // a 66-character pool address nobody recognises.
+                    body: `${e.label || e.query} is taken out of your recent scans. This cannot be undone.`,
+                    action: "Remove",
+                    run: () => setHistory(forgetScan(e.query)),
+                  })
+                }
+                onClear={() =>
+                  setConfirming({
+                    title: "Clear scan history?",
+                    body: "Every recent scan on this device is forgotten. This cannot be undone.",
+                    action: "Clear history",
+                    run: () => setHistory(clearHistory()),
+                  })
+                }
               />
             ) : null}
           </IdleFrame>
@@ -382,9 +459,9 @@ export function XCapApp() {
           column, so it stays reachable while the results scroll under it. The
           gradient keeps text from colliding with it on the way past. */}
       <div
-        // inert, not just a lower z-index: a panel on top stops the clicks,
+        // inert, not just a lower z-index: a dialog on top stops the clicks,
         // but Tab would still walk into the field behind it.
-        inert={panel !== null || scanning}
+        inert={panel !== null || scanning || confirming !== null}
         className="pointer-events-none fixed inset-x-0 bottom-0 z-40 pb-[max(1rem,env(safe-area-inset-bottom))] pt-10 bg-gradient-to-t from-bg via-bg/90 to-transparent"
       >
         <form
@@ -658,13 +735,98 @@ function ScanningDialog({
   );
 }
 
-function Overlay({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
+const PAGES = ["settings", "console", "install"] as const;
+type Page = (typeof PAGES)[number];
+
+// The path past the app's base (/ in dev, /<repo>/ on Pages).
+function pathRest(): string {
+  if (typeof window === "undefined") return "";
+  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+  return decodeURIComponent(window.location.pathname.slice(base.length)).replace(/^\/+|\/+$/g, "");
+}
+
+// Where a result lives: the pool it is about, or the coin's own slug under
+// /currencies/ as CoinMarketCap spells it.
+function resultPathOf(out: ScanOk): string {
+  const first = out.rows[0];
+  if (!first) return "";
+  if (first.kind === "dex") return first.poolAddress;
+  return first.slug ? `currencies/${first.slug}` : "";
+}
+
+function queryFromPath(rest: string): { query: string; source: Source } {
+  const cmc = rest.match(/^currencies\/([^/]+)$/);
+  if (cmc) return { query: `https://coinmarketcap.com/currencies/${cmc[1]}/`, source: "cmc" };
+  return { query: rest, source: "dex" };
+}
+
+type ConfirmRequest = {
+  title: string;
+  body: string;
+  /** The verb on the confirm button: says what happens, not "OK". */
+  action: string;
+  run: () => void;
+};
+
+// Cancel takes focus, so Enter on a dialog that just opened never destroys
+// anything by accident; Escape and the backdrop both cancel.
+function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; onClose: () => void }) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <Overlay onClose={onClose}>
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        aria-describedby="confirm-body"
+        className="rounded-3xl bg-surface p-5 shadow-panel"
+      >
+        {/* Same frame as Settings / Console / Install: title and close in a
+            mb-4 header row, a mt-4 footer with the actions at the end. */}
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <h2 id="confirm-title" className="text-base font-medium text-fg">
+            {request.title}
+          </h2>
+          <button
+            type="button"
+            aria-label="Close"
+            className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <p id="confirm-body" className="text-sm leading-relaxed text-muted">
+          {request.body}
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button ref={cancelRef} variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              request.run();
+              onClose();
+            }}
+          >
+            {request.action}
+          </Button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
       <button
@@ -746,9 +908,7 @@ function SoundSettings({
             disabled={!settings.sound}
             className={cn(
               "h-11 rounded-full px-4 text-xs font-medium transition-colors duration-150 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-              settings.chime === c.id
-                ? "bg-fg text-bg"
-                : "bg-surface-2 text-muted hover:text-fg",
+              settings.chime === c.id ? "bg-fg text-bg" : "bg-surface-2 text-muted hover:text-fg",
             )}
             onClick={() => preview({ chime: c.id as ChimeName })}
           >
@@ -772,12 +932,12 @@ function SettingsPanel({
   const [saved, setSaved] = useState(false);
   return (
     <div className="rounded-3xl bg-surface p-5 shadow-panel">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between gap-4">
         <h2 className="text-base font-medium text-fg">Settings</h2>
         <button
           type="button"
           aria-label="Close"
-          className="flex size-11 items-center justify-center rounded-full text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           onClick={onClose}
         >
           <X size={18} />
@@ -846,7 +1006,11 @@ function barsUrl(
   const path = `${encodeURIComponent(dexId)}/bars/${encodeURIComponent(chain)}/${encodeURIComponent(pool)}`;
   const q = quote ? `&q=${encodeURIComponent(quote)}` : "";
   // Pasted with or without the scheme and trailing slash.
-  const h = (host ?? "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "") || DEFAULT_CHART_HOST;
+  const h =
+    (host ?? "")
+      .trim()
+      .replace(/^https?:\/\//, "")
+      .replace(/\/+$/, "") || DEFAULT_CHART_HOST;
   return `https://${h}/dex/chart/amm/v3/${path}?res=15&cb=2${q}`;
 }
 
@@ -861,7 +1025,7 @@ function ConsolePanel({
 }) {
   return (
     <div className="rounded-3xl bg-surface p-5 shadow-panel">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between gap-4">
         <h2 className="text-base font-medium text-fg">Console</h2>
         <div className="flex items-center gap-1">
           {entries.length ? (
@@ -872,7 +1036,7 @@ function ConsolePanel({
           <button
             type="button"
             aria-label="Close"
-            className="flex size-11 items-center justify-center rounded-full text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             onClick={onClose}
           >
             <X size={18} />
@@ -883,9 +1047,7 @@ function ConsolePanel({
         <ul className="max-h-[60dvh] space-y-2 overflow-y-auto font-mono text-xs">
           {entries.map((e, i) => (
             <li key={`${e.at}-${i}`} className="flex gap-2">
-              <span className="shrink-0 text-muted">
-                {new Date(e.at).toLocaleTimeString()}
-              </span>
+              <span className="shrink-0 text-muted">{new Date(e.at).toLocaleTimeString()}</span>
               <button
                 type="button"
                 title="Copy"
@@ -968,12 +1130,12 @@ function InstallPanel({ onClose }: { onClose: () => void }) {
   ];
   return (
     <div className="rounded-3xl bg-surface p-5 shadow-panel">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between gap-4">
         <h2 className="text-base font-medium text-fg">Chrome extension</h2>
         <button
           type="button"
           aria-label="Close"
-          className="flex size-11 items-center justify-center rounded-full text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           onClick={onClose}
         >
           <X size={18} />
@@ -982,7 +1144,7 @@ function InstallPanel({ onClose }: { onClose: () => void }) {
       <p className="mb-4 text-sm leading-relaxed text-muted">
         Same capture as this app, on the live page. Nothing runs until you press Scan.
       </p>
-      <ol className="mb-5 space-y-3 text-sm leading-relaxed text-muted">
+      <ol className="space-y-3 text-sm leading-relaxed text-muted">
         {steps.map((s, i) => (
           <li key={s} className="flex gap-3">
             <span className="w-4 shrink-0 tabular-nums text-faint">{i + 1}</span>
@@ -990,14 +1152,16 @@ function InstallPanel({ onClose }: { onClose: () => void }) {
           </li>
         ))}
       </ol>
-      <a
-        href={`${import.meta.env.BASE_URL}xcap-extension.zip`}
-        download="xcap-extension.zip"
-        className="inline-flex h-11 items-center gap-2 rounded-full bg-fg px-4 font-sans text-sm font-medium text-bg hover:bg-fg-hover"
-      >
-        <Download size={16} />
-        Download extension
-      </a>
+      <div className="mt-4 flex justify-end">
+        <a
+          href={`${import.meta.env.BASE_URL}xcap-extension.zip`}
+          download="xcap-extension.zip"
+          className="inline-flex h-11 items-center gap-2 rounded-full bg-fg px-4 font-sans text-sm font-medium text-bg hover:bg-fg-hover"
+        >
+          <Download size={16} />
+          Download extension
+        </a>
+      </div>
     </div>
   );
 }

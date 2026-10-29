@@ -786,6 +786,9 @@ var __XCAP_EXTENSION = true;
     .tbtn.primary { background: var(--fg); color: var(--bg); box-shadow: none; }
     .tbtn.primary:hover { background: #fff; }
     .tbtn.narrow { flex: 0 0 auto; width: 36px; padding: 0; }
+    .tbtn.danger { background: #dc2626; color: #fff; box-shadow: none; }
+    .tbtn.danger:hover { background: #b91c1c; }
+    .bar .confirm { flex: 1; align-self: center; font-size: 12px; color: var(--fg-dim); }
     .tbtn.ok { color: var(--bg); background: var(--fg); }
 
     .hint { padding: 8px 10px 10px; font-size: 12px; line-height: 1.5; color: var(--fg-faint); }
@@ -1192,9 +1195,19 @@ var __XCAP_EXTENSION = true;
             () => JSON.stringify(visible().map(r => JSON.parse(jsonOf(r))), null, 2)));
         foot.appendChild(copyBar);
 
+        // Clearing cannot be undone (CLAUDE.md), so the trash button first
+        // swaps this bar for a confirm row; Cancel takes focus.
         const goBar = el('div', 'bar');
-        goBar.appendChild(textBtn('', 'trash', 'Clear everything captured',
-            () => { clearAll(); query = ''; render(true); }, 'narrow'));
+        const askClear = () => {
+            goBar.textContent = '';
+            goBar.appendChild(el('span', 'confirm', 'Clear everything captured?'));
+            const cancel = textBtn('Cancel', null, '', () => render(true));
+            goBar.appendChild(cancel);
+            goBar.appendChild(textBtn('Clear', 'trash', 'This cannot be undone',
+                () => { clearAll(); query = ''; render(true); }, 'danger'));
+            cancel.focus();
+        };
+        goBar.appendChild(textBtn('', 'trash', 'Clear everything captured', askClear, 'narrow'));
         foot.appendChild(goBar);
 
         panel.appendChild(foot);

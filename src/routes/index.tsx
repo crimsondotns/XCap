@@ -1,8 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { XCapApp } from "@/components/xcap-app";
 
-export const Route = createFileRoute("/")({ component: Home });
-
-function Home() {
-  return <XCapApp />;
-}
+// The app itself is mounted by __root; each route only claims its URL.
+export const Route = createFileRoute("/")({ component: () => null });

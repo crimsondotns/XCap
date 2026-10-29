@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "XCap",
-  "version": "2.12.4",
+  "version": "2.13.1",
   "description": "Capture DexScreener pools and CoinMarketCap contracts. Nothing runs until you press Scan.",
   "permissions": [
     "storage",

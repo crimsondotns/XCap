@@ -2,8 +2,8 @@ import { Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { columnsOf, isCmc, jsonOf, presentRow, tsvOf } from "@/lib/present";
-import type { Overview, ScanOk, ScanRow, Settings } from "@/lib/types";
+import { isCmc, presentRow, tsvOf } from "@/lib/present";
+import type { DexRow, Overview, ScanOk, ScanRow, Settings } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 async function writeClipboard(text: string) {
@@ -20,24 +20,56 @@ async function writeClipboard(text: string) {
   }
 }
 
-function Avatar({ src, symbol }: { src?: string; symbol: string }) {
+// DexScreener's own image paths: every chain it lists has an icon here, and
+// a token's icon is here too when it has one (a 404 otherwise, and the
+// letter takes over). Read from the source, not mapped (CLAUDE.md).
+const chainIcon = (chain: string) =>
+  `https://dd.dexscreener.com/ds-data/chains/${encodeURIComponent(chain.toLowerCase())}.png`;
+const tokenIcon = (chain: string, address: string) =>
+  `https://dd.dexscreener.com/ds-data/tokens/${encodeURIComponent(chain.toLowerCase())}/${encodeURIComponent(address.toLowerCase())}.png`;
+
+function Avatar({
+  src,
+  symbol,
+  chain,
+}: {
+  src?: string;
+  symbol: string;
+  /** Adds the chain's icon as a badge on the bottom-right of the token. */
+  chain?: string;
+}) {
   const [failed, setFailed] = useState(false);
-  if (!src || failed) {
-    return (
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs font-medium text-muted">
-        {(symbol || "?").slice(0, 1)}
-      </span>
-    );
-  }
+  const [badgeFailed, setBadgeFailed] = useState(false);
   return (
-    <img
-      src={src}
-      alt=""
-      width={36}
-      height={36}
-      className="size-9 shrink-0 rounded-full bg-surface-2 object-cover"
-      onError={() => setFailed(true)}
-    />
+    <span className="relative inline-flex size-9 shrink-0">
+      {!src || failed ? (
+        <span className="flex size-9 items-center justify-center rounded-full bg-surface-2 text-xs font-medium text-muted">
+          {(symbol || "?").slice(0, 1)}
+        </span>
+      ) : (
+        <img
+          src={src}
+          alt=""
+          width={36}
+          height={36}
+          className="size-9 rounded-full bg-surface-2 object-cover"
+          onError={() => setFailed(true)}
+        />
+      )}
+      {chain && !badgeFailed ? (
+        // Ringed in the page colour so it reads as sitting on top of the
+        // token rather than bitten out of it.
+        <img
+          src={chainIcon(chain)}
+          alt={chain}
+          title={chain}
+          width={16}
+          height={16}
+          className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-surface-2 object-cover ring-2 ring-bg"
+          onError={() => setBadgeFailed(true)}
+        />
+      ) : null}
+    </span>
   );
 }
 
@@ -52,25 +84,34 @@ function Field({
   value,
   copyValue,
   hint,
+  kind = "address",
 }: {
   label: string;
   value: string;
   copyValue?: string;
   hint?: string;
+  // How the value is set: an address breaks anywhere in mono, a figure keeps
+  // its digits on one line, a name reads as ordinary text.
+  kind?: FieldKind;
 }) {
   if (!value && !hint) return null;
   return (
-    <div className="flex items-start gap-2 py-1">
+    <div className="flex min-h-11 items-start gap-3 py-2.5">
       {/* Half step kept: it lines the 12px label up with the 14px value. */}
-      <span className="w-16 shrink-0 pt-0.5 text-xs text-muted">{label}</span>
+      <span className="w-20 shrink-0 pt-0.5 text-xs text-muted">{label}</span>
       {value ? (
         // The value is the button: an address is what the eye goes to and
         // what the hand wants to click, so a separate icon beside it was one
         // more target for the same job.
         <button
           type="button"
-          title={`Copy ${label}`}
-          className="min-w-0 flex-1 cursor-pointer break-all text-left font-mono text-sm leading-relaxed text-fg transition-colors duration-150 hover:text-muted"
+          title={`Copy ${label}: ${copyValue ?? value}`}
+          // The negative margin grows the hit area to 44px without moving the
+          // text the row lines up on.
+          className={cn(
+            "-my-2.5 min-h-11 min-w-0 flex-1 cursor-pointer py-2.5 text-left text-sm leading-relaxed text-fg transition-colors duration-150 hover:text-muted",
+            FIELD_KIND[kind],
+          )}
           onClick={() => copyValue_(label, copyValue ?? value)}
         >
           {value}
@@ -81,6 +122,14 @@ function Field({
     </div>
   );
 }
+
+type FieldKind = "address" | "number" | "text";
+
+const FIELD_KIND: Record<FieldKind, string> = {
+  address: "break-all font-mono",
+  number: "truncate font-sans tabular-nums",
+  text: "font-sans",
+};
 
 // One place decides what a copy looks like from the outside: the text lands
 // on the clipboard and the toast says so.
@@ -122,7 +171,7 @@ function CoinCard({ overview, rows }: { overview: Overview; rows: ScanRow[] }) {
   return (
     // No fill and no ring: the page is the card's ground, and the rules
     // between the figures carry the structure the box was drawing.
-    <div className="mb-3 overflow-hidden">
+    <div className="mb-3">
       {/* The head copies every contract as TSV, the way a row header does
           elsewhere: the card replaced those rows, and their copy with them. */}
       <button
@@ -133,7 +182,7 @@ function CoinCard({ overview, rows }: { overview: Overview; rows: ScanRow[] }) {
       >
         <Preview overview={overview} />
       </button>
-      <div className="px-4 pb-3 pt-1">
+      <div className="divide-y divide-border border-t border-border">
         {contracts.map((row, i) => (
           <Field
             key={`${row.platformId}-${row.tokenAddress}-${i}`}
@@ -143,8 +192,18 @@ function CoinCard({ overview, rows }: { overview: Overview; rows: ScanRow[] }) {
             value={row.tokenAddress}
           />
         ))}
-        <Field label="Circulating" value={overview.circulating ? formatQty(overview.circulating) : ""} />
-        <Field label="Total" value={overview.totalSupply ? formatQty(overview.totalSupply) : ""} />
+        <Field
+          label="Circulating"
+          kind="number"
+          value={overview.circulating ? formatQty(overview.circulating) : ""}
+          copyValue={overview.circulating}
+        />
+        <Field
+          label="Total"
+          kind="number"
+          value={overview.totalSupply ? formatQty(overview.totalSupply) : ""}
+          copyValue={overview.totalSupply}
+        />
       </div>
     </div>
   );
@@ -155,27 +214,24 @@ function Preview({ overview }: { overview: Overview }) {
   const change = overview.change24h;
   return (
     <>
-      <div className="flex items-center gap-3 px-4 py-3">
-        <Avatar src={overview.image} symbol={overview.symbol} />
+      <div className="mb-3 flex items-center">
+        <AvatarBox>
+          <Avatar src={overview.image} symbol={overview.symbol} />
+        </AvatarBox>
         <div className="min-w-0 flex-1">
           <h2
-            className="truncate text-sm font-normal text-muted"
+            className="truncate text-base font-medium text-fg"
             title={`${overview.name || overview.symbol}${overview.symbol ? ` (${overview.symbol})` : ""}`}
           >
             {overview.name || overview.symbol}
             {overview.symbol ? ` (${overview.symbol})` : ""}
           </h2>
           <div className="flex items-baseline gap-2">
-            <span className="truncate text-xl font-medium tracking-tight text-fg">
+            <p className="truncate text-xl font-medium tracking-tight tabular-nums text-fg">
               {formatPrice(overview.priceUsd)}
-            </span>
+            </p>
             {change != null ? (
-              <span
-                className={cn(
-                  "text-sm tabular-nums",
-                  change >= 0 ? "text-ok" : "text-warn",
-                )}
-              >
+              <span className={cn("text-sm tabular-nums", change >= 0 ? "text-ok" : "text-warn")}>
                 {/* The sign carries the direction too, not the colour alone. */}
                 {change >= 0 ? "▲ +" : "▼ −"}
                 {Math.abs(change).toFixed(2)}%
@@ -222,19 +278,11 @@ function exactUsd(raw: string): string {
   return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 }
 
-function Stat({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-}) {
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     // The browser's own tooltip: nothing to position, nothing to clip, and it
     // behaves the way every other tooltip on the machine does.
-    <div className="px-3 py-3 text-center" title={hint}>
+    <div className="px-2 py-3 text-center" title={hint}>
       <div className="text-xs text-faint">{label}</div>
       <div className="mt-1 truncate text-sm tabular-nums text-fg">{value}</div>
     </div>
@@ -274,29 +322,25 @@ export function Results({
   extensionVersion?: string | null;
   onClear: () => void;
 }) {
-  const [copied, setCopied] = useState<string | null>(null);
-
   const rows = useMemo(
     () => result.rows.map((row) => presentRow(row, settings)),
     [result.rows, settings],
   );
-  const columns = columnsOf(rows);
   const embed = result.rows.find((r): r is Extract<ScanRow, { kind: "dex" }> => r.kind === "dex");
+  const dexRows = rows.filter((r): r is DexRow => !isCmc(r));
 
-  async function copy(label: string, text: string) {
-    await writeClipboard(text);
-    setCopied(label);
-    window.setTimeout(() => setCopied((cur) => (cur === label ? null : cur)), 1400);
+  if (embed && !result.overview && dexRows.length > 0) {
+    return (
+      <section className="mx-auto flex w-full max-w-3xl flex-col px-4">
+        <DexResult embed={embed} rows={dexRows} extensionVersion={extensionVersion} />
+        <ClearBar onClear={onClear} />
+      </section>
+    );
   }
 
-  const tsv = rows.map(tsvOf).join("\n");
-  const json = JSON.stringify(rows.map(jsonOf), null, 2);
-
   return (
-    <section className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4">
-      {embed ? <DexEmbed chain={embed.chain} pool={embed.poolAddress} /> : null}
-
-      <div className="min-h-0 flex-1 overflow-auto pb-2 pt-4">
+    <section className="mx-auto flex w-full max-w-3xl flex-col px-4">
+      <div className="pt-4">
         {result.overview ? (
           <CoinCard overview={result.overview} rows={rows} />
         ) : rows.length === 0 ? (
@@ -304,10 +348,9 @@ export function Results({
         ) : (
           <ul className="space-y-2">
             {rows.map((row, i) => (
-              <li
-                key={rowKey(row, i)}
-                className="rounded-2xl bg-surface p-4"
-              >
+              <li key={rowKey(row, i)} className="rounded-2xl bg-surface p-4">
+                {/* Only CoinMarketCap rows reach here: a DexScreener scan never
+                    carries an overview, so it always renders through DexResult. */}
                 {isCmc(row) ? (
                   <>
                     <button
@@ -335,78 +378,128 @@ export function Results({
                       <Field label="Contract" value={row.tokenAddress} />
                     </div>
                   </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      title="Copy this row as TSV"
-                      className="flex w-full items-center gap-3 text-left"
-                      onClick={() => copyValue_("row", tsvOf(row))}
-                    >
-                      <Avatar src={row.imageUrl} symbol={row.symbol} />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-fg">
-                          {row.symbol || "—"}
-                        </div>
-                        <div
-                          className="truncate text-xs text-muted"
-                          title={`${row.dexId} · ${row.chain}`}
-                        >
-                          {row.dexId} · {row.chain}
-                        </div>
-                      </div>
-                    </button>
-                    <div className="mt-2 border-t border-border pt-1">
-                      <Field
-                        label="DexID"
-                        value={row.dexId}
-                        hint={
-                          extensionVersion
-                            ? `from the chart worker… (XCap ${extensionVersion})`
-                            : "install the XCap extension to capture this"
-                        }
-                      />
-                      <Field label="Contract" value={row.contract} />
-                      <Field label="Pool" value={row.poolAddress} />
-                      <Field label="Quote" value={row.quote} />
-                      <Field
-                        label="Supply"
-                        value={row.supply ? formatQty(row.supply) : ""}
-                        copyValue={row.supply}
-                      />
-                      <Field
-                        label="Total"
-                        value={row.totalSupply ? formatQty(row.totalSupply) : ""}
-                        copyValue={row.totalSupply}
-                      />
-                    </div>
-                  </>
-                )}
+                ) : null}
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-border py-3">
-        <Button size="sm" onClick={() => copy("tsv", tsv)}>
-          {copied === "tsv" ? "Copied" : "Copy TSV"}
-        </Button>
-        <Button size="sm" onClick={() => copy("json", json)}>
-          {copied === "json" ? "Copied" : "JSON"}
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="ml-auto"
-          title="Clear captured rows"
-          onClick={onClear}
-        >
-          <Trash2 size={16} />
-        </Button>
-      </div>
-      <p className="pb-1 text-xs text-faint">Columns — {columns.join(" · ")}</p>
+      <ClearBar onClear={onClear} />
     </section>
+  );
+}
+
+// Sized to its content, not stretched to the viewport: stretched, the clear
+// button sat at the bottom of the screen with half a page of nothing above it.
+function ClearBar({ onClear }: { onClear: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border py-3">
+      <Button
+        size="icon"
+        variant="ghost"
+        className="ml-auto"
+        title="Clear captured rows"
+        onClick={onClear}
+      >
+        <Trash2 size={16} />
+      </Button>
+    </div>
+  );
+}
+
+function dexIdHint(extensionVersion?: string | null) {
+  return extensionVersion
+    ? `Waiting for the chart worker (XCap ${extensionVersion})`
+    : "Install the XCap extension to capture this";
+}
+
+// Label width plus the row gap, so a title starts where the values below it do.
+function AvatarBox({ children }: { children: React.ReactNode }) {
+  return <div className="flex w-23 shrink-0 items-center">{children}</div>;
+}
+
+function pairName(row: DexRow) {
+  return row.quoteSymbol ? `${row.symbol}/${row.quoteSymbol}` : row.symbol || "—";
+}
+
+/**
+ * A DexScreener pool: every value on its own line, data first, and the chart
+ * behind a button so the page opens on what gets copied. No card around it:
+ * the page is the ground, the rules between lines carry the structure. A
+ * value is copied by clicking it, as everywhere else.
+ */
+function DexResult({
+  embed,
+  rows,
+  extensionVersion,
+}: {
+  embed: DexRow;
+  rows: DexRow[];
+  extensionVersion?: string | null;
+}) {
+  const [chart, setChart] = useState(false);
+  return (
+    <div className="pt-4">
+      {rows.map((row, i) => (
+        <section
+          key={rowKey(row, i)}
+          aria-labelledby={`pool-${i}`}
+          className={cn(i > 0 && "mt-4 border-t border-border pt-4")}
+        >
+          <div className="mb-3 flex items-center gap-2">
+            {/* The head copies the whole row as TSV: pasted into a sheet it
+                lands across the columns (Symbol, ChainID, DexID, Quote,
+                Contract, Pool Address). The button sits inside the h2, so
+                the heading stays a heading. */}
+            <h2 id={`pool-${i}`} className="min-w-0 flex-1">
+              <button
+                type="button"
+                title="Copy this row as TSV — paste into a sheet as columns"
+                className="-my-1 flex min-h-11 w-full items-center rounded-2xl text-left transition-colors duration-150 hover:text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                onClick={() => copyValue_("row", tsvOf(row))}
+              >
+                <AvatarBox>
+                  <Avatar
+                    src={row.imageUrl || (row.contract ? tokenIcon(row.chain, row.contract) : "")}
+                    symbol={row.symbol}
+                    chain={row.chain}
+                  />
+                </AvatarBox>
+                <span className="min-w-0 flex-1 truncate text-base font-medium">
+                  {pairName(row)}
+                </span>
+              </button>
+            </h2>
+            {i === 0 ? (
+              <Button onClick={() => setChart((v) => !v)}>
+                {chart ? "Hide chart" : "Show chart"}
+              </Button>
+            ) : null}
+          </div>
+          {i === 0 && chart ? <DexEmbed chain={embed.chain} pool={embed.poolAddress} /> : null}
+          <div className="divide-y divide-border border-t border-border">
+            <Field label="Chain" kind="text" value={row.chain} />
+            <Field label="DexID" kind="text" value={row.dexId} hint={dexIdHint(extensionVersion)} />
+            <Field label="Contract" value={row.contract} />
+            <Field label="Pool" value={row.poolAddress} />
+            <Field label="Quote" value={row.quote} />
+            <Field
+              label="Supply"
+              kind="number"
+              value={row.supply ? formatQty(row.supply) : ""}
+              copyValue={row.supply}
+            />
+            <Field
+              label="Total"
+              kind="number"
+              value={row.totalSupply ? formatQty(row.totalSupply) : ""}
+              copyValue={row.totalSupply}
+            />
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 

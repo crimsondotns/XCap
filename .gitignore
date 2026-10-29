@@ -10,3 +10,5 @@ dist-pages
 .env.local
 .env.*.local
 screenshots
+CLAUDE.md
+screen_capture_*.png

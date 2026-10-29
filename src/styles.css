@@ -19,6 +19,10 @@
   --color-warn: #d4b8b0;
   /* Destructive text, focus ring and the primary button's hover. */
   --color-danger: #f0a39a;
+  /* Fill for destructive buttons. #f0a39a is for text on dark; white on it
+     would read at ~2:1. White on these is 4.8:1 and 6.5:1. */
+  --color-danger-fill: #dc2626;
+  --color-danger-fill-hover: #b91c1c;
   --color-ring: #f5f5f7;
   --color-fg-hover: #ffffff;
 
