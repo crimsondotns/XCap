@@ -28,6 +28,16 @@ const chainIcon = (chain: string) =>
 const tokenIcon = (chain: string, address: string) =>
   `https://dd.dexscreener.com/ds-data/tokens/${encodeURIComponent(chain.toLowerCase())}/${encodeURIComponent(address.toLowerCase())}.png`;
 
+// Token and chain icons are the one place allowed off the design system
+// (the user's call): real artwork, so they get depth instead of flat tokens.
+
+/** A stable hue per symbol, so a coin without artwork still looks like itself. */
+function hueOf(symbol: string): number {
+  let h = 0;
+  for (const ch of symbol.toUpperCase()) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+
 function Avatar({
   src,
   symbol,
@@ -39,23 +49,41 @@ function Avatar({
   chain?: string;
 }) {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [badgeFailed, setBadgeFailed] = useState(false);
+  const hue = hueOf(symbol || "?");
   return (
-    <span className="relative inline-flex size-9 shrink-0">
-      {!src || failed ? (
-        <span className="flex size-9 items-center justify-center rounded-full bg-surface-2 text-xs font-medium text-muted">
-          {(symbol || "?").slice(0, 1)}
-        </span>
-      ) : (
-        <img
-          src={src}
-          alt=""
-          width={36}
-          height={36}
-          className="size-9 rounded-full bg-surface-2 object-cover"
-          onError={() => setFailed(true)}
-        />
-      )}
+    <span className="relative inline-flex size-11 shrink-0">
+      <span
+        className="relative flex size-11 items-center justify-center overflow-hidden rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.45)]"
+        style={{
+          // Seen behind an icon while it loads, and as the whole face when
+          // there is no icon: a soft two-tone of the symbol's own hue.
+          background: `radial-gradient(120% 120% at 30% 20%, hsl(${hue} 55% 42%), hsl(${(hue + 40) % 360} 60% 18%))`,
+        }}
+      >
+        {!src || failed ? (
+          <span className="text-sm font-medium text-white/90 [text-shadow:0_1px_2px_rgba(0,0,0,0.4)]">
+            {(symbol || "?").slice(0, 2).toUpperCase()}
+          </span>
+        ) : (
+          <img
+            src={src}
+            alt=""
+            width={44}
+            height={44}
+            className={cn(
+              "size-11 object-cover transition-opacity duration-300",
+              loaded ? "opacity-100" : "opacity-0",
+            )}
+            onLoad={() => setLoaded(true)}
+            onError={() => setFailed(true)}
+          />
+        )}
+        {/* A hairline inside the edge: dark artwork does not dissolve into
+            the dark page, light artwork gets a finished rim. */}
+        <span className="pointer-events-none absolute inset-0 rounded-full ring-1 ring-inset ring-white/15" />
+      </span>
       {chain && !badgeFailed ? (
         // Ringed in the page colour so it reads as sitting on top of the
         // token rather than bitten out of it.
@@ -63,9 +91,9 @@ function Avatar({
           src={chainIcon(chain)}
           alt={chain}
           title={chain}
-          width={16}
-          height={16}
-          className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-surface-2 object-cover ring-2 ring-bg"
+          width={18}
+          height={18}
+          className="absolute -bottom-1 -right-1 size-[18px] rounded-full bg-surface-2 object-cover shadow-[0_1px_4px_rgba(0,0,0,0.5)] ring-[2.5px] ring-bg"
           onError={() => setBadgeFailed(true)}
         />
       ) : null}
