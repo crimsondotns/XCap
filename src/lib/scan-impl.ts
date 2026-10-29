@@ -195,17 +195,23 @@ async function resolveChartDexId(chain: string, pool: string): Promise<string> {
   const url =
     `https://dexscreener.com/${encodeURIComponent(chain)}/${encodeURIComponent(pool)}` +
     "?embed=1";
-  // A browser has to borrow a proxy, and some return a rewritten page (r.jina.ai
-  // turns it into Markdown) that lost the data, so each is read in turn until
-  // one still has it. The value is DexScreener's either way: a proxy only
-  // carries it, it cannot make a wrong name pass.
-  const attempts = [
-    url,
-    ...(isBrowser() ? CORS_PROXIES.map((p) => p(url)) : []),
-  ];
+  // A browser cannot read dexscreener.com itself (no CORS), so it borrows a
+  // proxy. Measured from the Pages origin: r.jina.ai returns the page as
+  // Markdown, which drops the pair data, unless asked for the raw HTML with
+  // X-Return-Format (it allows that header cross-origin) - then ~840 kB in
+  // ~2 s, data intact. allorigins and codetabs answered 522, corsproxy 403;
+  // they stay as fallbacks. The value is DexScreener's either way: a proxy
+  // only carries it, it cannot make a wrong name pass.
+  const attempts: { url: string; headers?: Record<string, string> }[] = isBrowser()
+    ? [
+        { url: `https://r.jina.ai/${url}`, headers: { "x-return-format": "html" } },
+        ...CORS_PROXIES.slice(1).map((p) => ({ url: p(url) })),
+      ]
+    : [{ url }];
   for (const attempt of attempts) {
     try {
-      const adapter = chartAdapterFromEmbed(await fetchTextOnce(attempt, 10000), pool);
+      const html = await fetchTextOnce(attempt.url, 15000, attempt.headers);
+      const adapter = chartAdapterFromEmbed(html, pool);
       if (adapter) return adapter;
     } catch (err) {
       if (activeScan?.signal.aborted) throw err;
@@ -345,7 +351,11 @@ const CORS_PROXIES: ((url: string) => string)[] = [
 const isProxied = (url: string) =>
   /corsproxy\.io|allorigins\.win|codetabs\.com|r\.jina\.ai/i.test(url);
 
-async function fetchTextOnce(url: string, timeoutMs: number): Promise<string> {
+async function fetchTextOnce(
+  url: string,
+  timeoutMs: number,
+  extraHeaders?: Record<string, string>,
+): Promise<string> {
   // Its own timer per attempt: a shared one lets the first slow proxy spend
   // the whole budget, and the rest never get a turn.
   const ctrl = new AbortController();
@@ -354,7 +364,10 @@ async function fetchTextOnce(url: string, timeoutMs: number): Promise<string> {
     timeoutMs,
   );
   try {
-    const headers: Record<string, string> = { accept: "application/json,text/plain,*/*" };
+    const headers: Record<string, string> = {
+      accept: "application/json,text/plain,*/*",
+      ...extraHeaders,
+    };
     if (!isBrowser() && !/r\.jina\.ai/i.test(url)) headers["user-agent"] = UA;
     const res = await fetch(url, { signal: scanSignal(ctrl.signal), headers });
     if (!res.ok) throw new Error(`Request failed (${res.status})`);
